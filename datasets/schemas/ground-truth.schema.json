@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://claimlens.local/schemas/ground-truth.schema.json",
+  "title": "ClaimLens ground-truth claim package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "dataset_version", "case_id", "split", "documents", "fields", "expected_validations"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "dataset_version": {"type": "string", "minLength": 1},
+    "case_id": {"type": "string", "pattern": "^CLM-[A-Z0-9-]+$"},
+    "split": {"enum": ["pilot", "train", "validation", "test"]},
+    "template_family": {"type": "string", "minLength": 1},
+    "documents": {
+      "type": "array", "minItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["document_id", "type", "filename", "sha256", "condition"],
+        "properties": {
+          "document_id": {"type": "string", "minLength": 1},
+          "type": {"enum": ["CLAIM_FORM", "INVOICE", "RECEIPT", "SUPPORTING_DOCUMENT"]},
+          "filename": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "condition": {"enum": ["digital", "clean_scan", "blur", "rotation", "low_contrast", "compressed", "low_resolution", "mixed"]},
+          "degradation": {"type": ["object", "null"]}
+        }
+      }
+    },
+    "fields": {
+      "type": "object", "additionalProperties": false,
+      "required": ["claim_reference", "member_number", "patient_name", "provider_name", "invoice_number", "invoice_date", "service_date", "claimed_amount", "invoice_total", "receipt_amount", "currency", "service_description"],
+      "properties": {
+        "claim_reference": {"$ref": "#/$defs/textField"},
+        "member_number": {"$ref": "#/$defs/textField"},
+        "patient_name": {"$ref": "#/$defs/textField"},
+        "provider_name": {"$ref": "#/$defs/textField"},
+        "invoice_number": {"$ref": "#/$defs/textField"},
+        "invoice_date": {"$ref": "#/$defs/dateField"},
+        "service_date": {"$ref": "#/$defs/dateField"},
+        "claimed_amount": {"$ref": "#/$defs/moneyField"},
+        "invoice_total": {"$ref": "#/$defs/moneyField"},
+        "receipt_amount": {"$ref": "#/$defs/moneyField"},
+        "currency": {"$ref": "#/$defs/currencyField"},
+        "service_description": {
+          "type": "object", "additionalProperties": false, "required": ["value", "sources"],
+          "properties": {"value": {"type": ["array", "null"], "items": {"type": "string", "minLength": 1}}, "sources": {"$ref": "#/$defs/sources"}}
+        }
+      }
+    },
+    "expected_validations": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["rule_id", "expected_status"],
+        "properties": {
+          "rule_id": {"enum": ["CLAIMED_VS_INVOICE_AMOUNT", "INVOICE_VS_RECEIPT_AMOUNT", "IDENTITY_CONSISTENCY", "SERVICE_VS_INVOICE_DATE", "CURRENCY_CONSISTENCY"]},
+          "expected_status": {"enum": ["PASS", "WARNING", "NOT_APPLICABLE"]},
+          "note": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object", "additionalProperties": false, "required": ["document_id", "page", "bbox"],
+      "properties": {
+        "document_id": {"type": "string", "minLength": 1},
+        "page": {"type": "integer", "minimum": 1},
+        "bbox": {"type": "array", "description": "Normalised [x_min,y_min,x_max,y_max] coordinates.", "prefixItems": [{"type": "number", "minimum": 0, "maximum": 1}, {"type": "number", "minimum": 0, "maximum": 1}, {"type": "number", "minimum": 0, "maximum": 1}, {"type": "number", "minimum": 0, "maximum": 1}], "items": false},
+        "raw_text": {"type": "string"}
+      }
+    },
+    "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}},
+    "textField": {"type": "object", "additionalProperties": false, "required": ["value", "sources"], "properties": {"value": {"type": "string", "minLength": 1}, "sources": {"$ref": "#/$defs/sources"}}},
+    "dateField": {"type": "object", "additionalProperties": false, "required": ["value", "sources"], "properties": {"value": {"type": "string", "format": "date"}, "sources": {"$ref": "#/$defs/sources"}}},
+    "moneyField": {"type": "object", "additionalProperties": false, "required": ["value", "sources"], "properties": {"value": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.[0-9]{2}$"}, "sources": {"$ref": "#/$defs/sources"}}},
+    "currencyField": {"type": "object", "additionalProperties": false, "required": ["value", "sources"], "properties": {"value": {"type": "string", "pattern": "^[A-Z]{3}$"}, "sources": {"$ref": "#/$defs/sources"}}}
+  }
+}

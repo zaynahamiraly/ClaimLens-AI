@@ -1,0 +1,285 @@
+{
+  "schema_version": "1.0",
+  "dataset_version": "pilot-1",
+  "case_id": "CLM-GOLD-001",
+  "split": "pilot",
+  "template_family": "mauritius-clinic-a",
+  "documents": [
+    {
+      "document_id": "form-1",
+      "type": "CLAIM_FORM",
+      "filename": "claim_form.pdf",
+      "sha256": "a0f17c46f5e3c52ffbc1661a2f3a6292d62620ef531b8ceaee4761ac2e860ef2",
+      "condition": "digital",
+      "degradation": null
+    },
+    {
+      "document_id": "invoice-1",
+      "type": "INVOICE",
+      "filename": "invoice.pdf",
+      "sha256": "36bae5108e20fa47054c0f05f5a5b606f8341fef4c411ce93fc264881fc67d9f",
+      "condition": "digital",
+      "degradation": null
+    },
+    {
+      "document_id": "receipt-1",
+      "type": "RECEIPT",
+      "filename": "receipt.pdf",
+      "sha256": "192ebb4f04147716e81d276e34ac827f96e974f4997e5a809b592c06b3cd58c1",
+      "condition": "digital",
+      "degradation": null
+    }
+  ],
+  "fields": {
+    "claim_reference": {
+      "value": "CLM-GOLD-001",
+      "sources": [
+        {
+          "document_id": "form-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.158165,
+            0.504318,
+            0.176115
+          ],
+          "raw_text": "CLM-GOLD-001"
+        }
+      ]
+    },
+    "member_number": {
+      "value": "MEM10001",
+      "sources": [
+        {
+          "document_id": "form-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.205671,
+            0.464274,
+            0.223621
+          ],
+          "raw_text": "MEM10001"
+        }
+      ]
+    },
+    "patient_name": {
+      "value": "Aisha Raman",
+      "sources": [
+        {
+          "document_id": "form-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.253177,
+            0.480709,
+            0.271127
+          ],
+          "raw_text": "Aisha Raman"
+        }
+      ]
+    },
+    "provider_name": {
+      "value": "Harbour Medical Centre",
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.097479,
+            0.052969,
+            0.476639,
+            0.085677
+          ],
+          "raw_text": "Harbour Medical Centre"
+        }
+      ]
+    },
+    "invoice_number": {
+      "value": "INV-8522",
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.158165,
+            0.447839,
+            0.176115
+          ],
+          "raw_text": "INV-8522"
+        }
+      ]
+    },
+    "invoice_date": {
+      "value": "2026-07-14",
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.205671,
+            0.462259,
+            0.223621
+          ],
+          "raw_text": "14/07/2026"
+        }
+      ]
+    },
+    "service_date": {
+      "value": "2026-07-12",
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.200235,
+            0.581057,
+            0.295529,
+            0.597375
+          ],
+          "raw_text": "12 July 2026"
+        }
+      ]
+    },
+    "claimed_amount": {
+      "value": "4580.00",
+      "sources": [
+        {
+          "document_id": "form-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.348189,
+            0.488936,
+            0.366139
+          ],
+          "raw_text": "MUR 4,580.00"
+        }
+      ]
+    },
+    "invoice_total": {
+      "value": "4580.00",
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.722689,
+            0.495439,
+            0.852713,
+            0.515064
+          ],
+          "raw_text": "MUR 4,580.00"
+        }
+      ]
+    },
+    "receipt_amount": {
+      "value": "4580.00",
+      "sources": [
+        {
+          "document_id": "receipt-1",
+          "page": 1,
+          "bbox": [
+            0.521008,
+            0.46152,
+            0.737714,
+            0.494228
+          ],
+          "raw_text": "MUR 4,580.00"
+        }
+      ]
+    },
+    "currency": {
+      "value": "MUR",
+      "sources": [
+        {
+          "document_id": "form-1",
+          "page": 1,
+          "bbox": [
+            0.369748,
+            0.348189,
+            0.411844,
+            0.366139
+          ],
+          "raw_text": "MUR"
+        },
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.72921,
+            0.343587,
+            0.767479,
+            0.359941
+          ],
+          "raw_text": "MUR"
+        },
+        {
+          "document_id": "receipt-1",
+          "page": 1,
+          "bbox": [
+            0.521008,
+            0.46152,
+            0.597546,
+            0.494228
+          ],
+          "raw_text": "MUR"
+        }
+      ]
+    },
+    "service_description": {
+      "value": [
+        "Medical consultation",
+        "Laboratory tests"
+      ],
+      "sources": [
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.097479,
+            0.385095,
+            0.249731,
+            0.401413
+          ],
+          "raw_text": "Medical consultation"
+        },
+        {
+          "document_id": "invoice-1",
+          "page": 1,
+          "bbox": [
+            0.097479,
+            0.426663,
+            0.217983,
+            0.442981
+          ],
+          "raw_text": "Laboratory tests"
+        }
+      ]
+    }
+  },
+  "expected_validations": [
+    {
+      "rule_id": "CLAIMED_VS_INVOICE_AMOUNT",
+      "expected_status": "PASS"
+    },
+    {
+      "rule_id": "INVOICE_VS_RECEIPT_AMOUNT",
+      "expected_status": "PASS"
+    },
+    {
+      "rule_id": "IDENTITY_CONSISTENCY",
+      "expected_status": "PASS"
+    },
+    {
+      "rule_id": "SERVICE_VS_INVOICE_DATE",
+      "expected_status": "PASS"
+    },
+    {
+      "rule_id": "CURRENCY_CONSISTENCY",
+      "expected_status": "PASS"
+    }
+  ]
+}
