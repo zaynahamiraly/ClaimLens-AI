@@ -6,13 +6,13 @@ import { LoginForm } from "./login-form";
 
 export const dynamic = "force-dynamic";
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; error?: string }> }) {
   if (hasSupabaseConfig && !isDemoMode) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (user) redirect("/dashboard");
   }
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
 
   return <main className="login-shell">
     <section className="login-brand">
@@ -20,6 +20,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <div className="hero-copy"><div className="eyebrow"><ShieldCheck size={15} /> Evidence-grounded claims review</div><h1>Every claim.<br /><em>Clearly understood.</em></h1><p>Turn complex health claim documents into structured, traceable decisions—with AI that always shows its work.</p><div className="proof"><div><b>12</b><span>fields extracted</span></div><div><b>40ms</b><span>pilot processing</span></div><div><b>100%</b><span>golden case</span></div></div></div>
       <p className="synthetic">Synthetic data only · Built for accountable, human-led decisions.</p>
     </section>
-    <section className="login-panel"><LoginForm demoMode={isDemoMode} configured={hasSupabaseConfig} next={next} /></section>
+    <section className="login-panel"><div>{error === "inactive" ? <p className="auth-error" role="alert">This account is inactive. Contact an administrator.</p> : error === "profile" ? <p className="auth-error" role="alert">Your workspace profile is not ready. Contact an administrator.</p> : null}<LoginForm demoMode={isDemoMode} configured={hasSupabaseConfig} next={next} /></div></section>
   </main>;
 }

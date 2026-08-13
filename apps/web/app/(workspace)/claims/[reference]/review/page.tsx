@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
 import { StatusPill } from "@/components/status-pill";
 import { getClaim, getClaimDocument } from "@/lib/claims";
+import { requireRole } from "@/lib/auth";
 import { verifyClaim } from "../../actions";
 
 export default async function ReviewPage({
@@ -14,7 +15,10 @@ export default async function ReviewPage({
   searchParams: Promise<{ verified?: string }>;
 }) {
   const { reference } = await params;
-  const claim = await getClaim(reference);
+  const [viewer, claim] = await Promise.all([
+    requireRole(["claims_officer", "supervisor", "administrator"]),
+    getClaim(reference),
+  ]);
   if (!claim) notFound();
 
   const [{ verified }, document] = await Promise.all([
@@ -23,14 +27,15 @@ export default async function ReviewPage({
   ]);
   const isGoldenDemo = reference === "CLM-2026-000142";
   const isVerified = claim.status === "VERIFIED" || verified === "1";
-  const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED";
+  const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
+    || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
   const verificationAction = verifyClaim.bind(null, claim.reference);
 
   return (
     <div className="review">
       <div className="review-top">
         <div>
-          <Link className="back" href="/claims">← Claims queue</Link>
+          <Link className="back" href={`/claims/${claim.reference}`}>← Claim details</Link>
           <h1>{claim.reference}</h1>
           <p>{claim.patientName} · {claim.providerName}</p>
         </div>

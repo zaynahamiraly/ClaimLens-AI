@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireViewer } from "@/lib/auth";
+import { requireRole, requireViewer } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isDemoMode } from "@/lib/config";
 
@@ -50,6 +50,7 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
   const { data: claim, error: claimError } = await supabase.from("claims").insert({
     reference, created_by: viewer.id, patient_name: parsed.data.patientName,
     provider_name: parsed.data.providerName, status: "PROCESSING",
+    client_id: viewer.role === "client" ? viewer.id : null,
   }).select("id").single();
   if (claimError || !claim) return { error: "Could not create the claim. Please try again." };
 
@@ -86,7 +87,7 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
 }
 
 export async function verifyClaim(reference: string) {
-  await requireViewer();
+  await requireRole(["claims_officer", "supervisor", "administrator"]);
   if (isDemoMode) redirect(`/claims/${reference}/review?verified=1`);
   const supabase = await createClient();
   const { error } = await supabase.rpc("verify_claim", { p_reference: reference });
@@ -95,4 +96,23 @@ export async function verifyClaim(reference: string) {
   revalidatePath("/claims");
   revalidatePath(`/claims/${reference}/review`);
   redirect(`/claims/${reference}/review?verified=1`);
+}
+
+export async function assignClaim(reference: string, formData?: FormData) {
+  const viewer = await requireRole(["claims_officer", "supervisor", "administrator"]);
+  if (isDemoMode) redirect(`/claims/${reference}`);
+  const requested = formData?.get("assignee");
+  const assignee = viewer.role === "claims_officer"
+    ? viewer.id
+    : typeof requested === "string" && z.uuid().safeParse(requested).success
+      ? requested
+      : null;
+  if (!assignee) throw new Error("Select an active claims officer.");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("assign_claim", { p_reference: reference, p_assignee: assignee });
+  if (error) throw new Error("Claim assignment failed.");
+  revalidatePath("/dashboard");
+  revalidatePath("/claims");
+  revalidatePath(`/claims/${reference}`);
+  redirect(`/claims/${reference}`);
 }

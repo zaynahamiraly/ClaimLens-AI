@@ -8,23 +8,25 @@ The web application is a Next.js 16 project in `apps/web`. Production fails clos
 2. Open SQL Editor and run these migrations in order:
    - `supabase/migrations/202608120001_web_mvp.sql`
    - `supabase/migrations/202608120002_production_hardening.sql`
-3. In Authentication, create the claims-officer user (email/password).
-4. Copy the project URL and publishable key from Project Settings → API.
+   - `supabase/migrations/202608130001_role_based_access.sql`
+3. In Authentication, create the first user. The role migration makes the first existing user the administrator; later sign-ups default to client.
+4. Copy the project URL, publishable key, and server secret key from Project Settings > API.
 
-The migrations create owner-scoped claims, document and audit metadata, atomic human verification, a private `claim-documents` bucket, file constraints, indexes, and row-level security policies. Do not expose a service-role key to the browser.
+The migrations create role-scoped claims, profiles, assignments, document and audit metadata, atomic human verification, a private `claim-documents` bucket, file constraints, indexes, and row-level security policies. The supported roles are client, claims officer, supervisor, and administrator. Do not expose the secret key to the browser.
 
 ## 2. Vercel
 
-1. Import `shuaib3011/ClaimLens-AI` in Vercel.
+1. Import `zaynahamiraly/ClaimLens-AI` in Vercel.
 2. Set Root Directory to `apps/web`.
 3. Keep the detected Next.js build settings.
-4. Add these variables to Production, Preview, and Development:
+4. Add these public variables to Production, Preview, and Development:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `NEXT_PUBLIC_DEMO_MODE=false`
-5. Deploy.
+5. Add `SUPABASE_SECRET_KEY` as a sensitive server-only Production variable. It is required for administrator account provisioning and must never use a `NEXT_PUBLIC_` prefix.
+6. Deploy.
 
-With both Supabase variables, login, claims, and private uploads use Supabase. Without them, production displays a setup-required state instead of exposing a demo workspace.
+With both public Supabase variables, login, claims, and private uploads use Supabase. Without them, production displays a setup-required state instead of exposing a demo workspace.
 
 ## 3. Local verification
 
@@ -39,4 +41,4 @@ npm run dev
 
 For a synthetic local walkthrough without Supabase, set `NEXT_PUBLIC_DEMO_MODE=true` in `.env.local`. Never enable it in Production.
 
-The current web MVP demonstrates the operational workflow and Pipeline A results. Running OCR in the cloud remains a separate worker integration; newly uploaded live claims enter `PROCESSING` and do not pretend to have completed AI results.
+The role-based web release demonstrates the operational workflow and Pipeline A results. Running OCR in the cloud remains a separate worker integration; newly uploaded live claims enter `PROCESSING` and do not pretend to have completed AI results.
