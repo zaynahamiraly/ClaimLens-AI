@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { login, type LoginState } from "./actions";
 
@@ -23,6 +24,7 @@ export function LoginForm({ demoMode, configured, next }: { demoMode: boolean; c
         {state.error ? <p className="auth-error" role="alert">{state.error}</p> : null}
         <button className="primary full" type="submit" disabled={!enabled || pending}>{pending ? "Signing in…" : "Sign in"} <ArrowRight size={17} /></button>
       </form>
+      {!demoMode && configured ? <p className="auth-switch">New to ClaimLens? <Link href="/signup">Create a client account</Link></p> : null}
       <div className="demo-note"><Sparkles size={16} /><span><b>{demoMode ? "Demo access" : configured ? "Supabase authentication" : "Configuration missing"}</b><br />{demoMode ? "Use the pre-filled synthetic credentials." : configured ? "Your session is protected with server-managed cookies." : "Add the Supabase URL and publishable key in Vercel."}</span></div>
     </div>
   );

@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig, hasSupabaseConfig, isDemoMode } from "@/lib/config";
 
-const PUBLIC_ROUTES = new Set(["/login", "/api/health"]);
+const PUBLIC_ROUTES = new Set(["/login", "/signup", "/auth/callback", "/api/health"]);
 
 export async function updateSession(request: NextRequest) {
   if (isDemoMode || !hasSupabaseConfig) return NextResponse.next({ request });
@@ -32,7 +32,7 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (user && pathname === "/login") {
+  if (user && (pathname === "/login" || pathname === "/signup")) {
     const dashboardUrl = request.nextUrl.clone();
     dashboardUrl.pathname = "/dashboard";
     dashboardUrl.search = "";

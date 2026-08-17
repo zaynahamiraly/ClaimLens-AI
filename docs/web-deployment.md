@@ -22,9 +22,12 @@ The migrations create role-scoped claims, profiles, assignments, document and au
 4. Add these public variables to Production, Preview, and Development:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `NEXT_PUBLIC_SITE_URL` (the canonical production URL)
    - `NEXT_PUBLIC_DEMO_MODE=false`
 5. Add `SUPABASE_SECRET_KEY` as a sensitive server-only Production variable. It is required for administrator account provisioning and must never use a `NEXT_PUBLIC_` prefix.
 6. Deploy.
+
+In Supabase Authentication > URL Configuration, set the Site URL to the canonical production URL and allow the exact `/auth/callback` URL. Email confirmation is required for public client registration.
 
 With both public Supabase variables, login, claims, and private uploads use Supabase. Without them, production displays a setup-required state instead of exposing a demo workspace.
 
