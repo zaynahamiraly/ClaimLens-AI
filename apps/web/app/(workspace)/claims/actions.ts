@@ -8,6 +8,7 @@ import { requireRole, requireViewer } from "@/lib/auth";
 import { enqueueClaimProcessing } from "@/lib/claim-processing";
 import { createClient } from "@/lib/supabase/server";
 import { isDemoMode } from "@/lib/config";
+import type { VerificationState } from "@/lib/types";
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 const MAX_FILES = 3;
@@ -115,16 +116,28 @@ export async function retryClaimProcessing(reference: string) {
   redirect(`/claims/${reference}`);
 }
 
-export async function verifyClaim(reference: string) {
+export async function verifyClaim(
+  reference: string,
+  _previousState: VerificationState,
+  _formData: FormData,
+): Promise<VerificationState> {
+  void _previousState;
+  void _formData;
   await requireRole(["claims_officer", "supervisor", "administrator"]);
-  if (isDemoMode) redirect(`/claims/${reference}/review?verified=1`);
+  if (isDemoMode) return { success: true };
   const supabase = await createClient();
   const { error } = await supabase.rpc("verify_claim", { p_reference: reference });
-  if (error) throw new Error("Claim verification failed.");
+  if (error) {
+    console.error("[verifyClaim] verification failed", { reference, error: error.message });
+    return { error: "Claim verification failed. Please try again." };
+  }
   revalidatePath("/dashboard");
   revalidatePath("/claims");
+  revalidatePath("/review-queue");
+  revalidatePath("/audit");
+  revalidatePath(`/claims/${reference}`);
   revalidatePath(`/claims/${reference}/review`);
-  redirect(`/claims/${reference}/review?verified=1`);
+  return { success: true };
 }
 
 export async function assignClaim(reference: string, formData?: FormData) {

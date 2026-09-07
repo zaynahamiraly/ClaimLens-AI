@@ -5,6 +5,11 @@ export type ClaimStatus =
   | "VERIFIED"
   | "PROCESSING_FAILED";
 
+export type VerificationState = {
+  success?: boolean;
+  error?: string;
+};
+
 export type ClaimDTO = {
   id: string;
   reference: string;

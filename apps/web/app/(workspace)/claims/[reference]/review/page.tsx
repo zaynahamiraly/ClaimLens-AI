@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { CheckCircle2, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
-import { StatusPill } from "@/components/status-pill";
+import { VerificationControls } from "@/components/verification-controls";
 import { getClaim, getClaimDocument, getClaimExtractedFields } from "@/lib/claims";
 import { requireRole } from "@/lib/auth";
 import { verifyClaim } from "../../actions";
@@ -40,14 +40,12 @@ export default async function ReviewPage({
           <h1>{claim.reference}</h1>
           <p>{claim.patientName} · {claim.providerName}</p>
         </div>
-        <div>
-          <StatusPill status={isVerified ? "VERIFIED" : claim.status} />
-          <form action={verificationAction}>
-            <button className="primary" type="submit" disabled={verificationDisabled}>
-              {isVerified ? <><CheckCircle2 />Verified</> : "Verify claim"}
-            </button>
-          </form>
-        </div>
+        <VerificationControls
+          action={verificationAction}
+          disabled={verificationDisabled}
+          initialVerified={isVerified}
+          status={claim.status}
+        />
       </div>
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
