@@ -7,6 +7,7 @@ import { getClaim, getClaimDocument, getClaimProcessing } from "@/lib/claims";
 import { canAssign, canReview } from "@/lib/permissions";
 import { listClaimsOfficers } from "@/lib/users";
 import { StatusPill } from "@/components/status-pill";
+import { ProcessingAutoRefresh } from "@/components/processing-auto-refresh";
 import { assignClaim, retryClaimProcessing } from "../actions";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ reference: string }> }) {
@@ -29,6 +30,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
   const canStartProcessing = ["UPLOADED", "PROCESSING", "PROCESSING_FAILED"].includes(claim.status) && !processingActive && !processingUnavailable;
 
   return <div className="content">
+    <ProcessingAutoRefresh active={processingActive} />
     <div className="title-row"><div><Link className="back" href="/claims">← Claims</Link><p className="kicker">Claim details</p><h1>{claim.reference}</h1><p>{claim.patientName} · {claim.providerName}</p></div><div className="title-actions"><StatusPill status={claim.status} />{mayReview ? <Link className="primary" href={`/claims/${claim.reference}/review`}><FileCheck2 />Open review</Link> : null}</div></div>
     <section className="detail-grid">
       <article className="detail-card"><FileText /><div><span>Claim amount</span><strong>{claim.amount}</strong><small>{document?.name ?? "Document processing pending"}</small></div>{document ? <a className="secondary" href={document.signedUrl} target="_blank" rel="noreferrer">Open document</a> : null}</article>
