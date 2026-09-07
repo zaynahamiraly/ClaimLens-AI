@@ -8,7 +8,7 @@ import { requireRole, requireViewer } from "@/lib/auth";
 import { enqueueClaimProcessing } from "@/lib/claim-processing";
 import { createClient } from "@/lib/supabase/server";
 import { isDemoMode } from "@/lib/config";
-import type { VerificationState } from "@/lib/types";
+import type { ClaimWorkflowState, VerificationState } from "@/lib/types";
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 const MAX_FILES = 3;
@@ -19,7 +19,33 @@ const claimSchema = z.object({
   providerName: z.string().trim().min(2, "Enter the provider name.").max(160),
 });
 
+const decisionSchema = z.object({
+  outcome: z.enum(["APPROVED", "REJECTED"]),
+  notes: z.string().trim().min(5, "Enter at least 5 characters of decision notes.").max(2000),
+  approvedAmount: z.string().trim(),
+}).superRefine((value, context) => {
+  if (value.outcome !== "APPROVED") return;
+  const amount = Number(value.approvedAmount);
+  if (!value.approvedAmount || !Number.isFinite(amount) || amount <= 0) {
+    context.addIssue({ code: "custom", path: ["approvedAmount"], message: "Enter a valid approved amount." });
+  }
+});
+
+const settlementSchema = z.object({
+  status: z.enum(["PAYMENT_PENDING", "PAID"]),
+});
+
 export type ClaimFormState = { error?: string; fieldErrors?: { patientName?: string[]; providerName?: string[] } };
+
+function revalidateClaimWorkflow(reference: string) {
+  revalidatePath("/dashboard");
+  revalidatePath("/claims");
+  revalidatePath("/review-queue");
+  revalidatePath("/analytics");
+  revalidatePath("/audit");
+  revalidatePath(`/claims/${reference}`);
+  revalidatePath(`/claims/${reference}/review`);
+}
 
 async function hasValidSignature(file: File) {
   const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
@@ -131,12 +157,65 @@ export async function verifyClaim(
     console.error("[verifyClaim] verification failed", { reference, error: error.message });
     return { error: "Claim verification failed. Please try again." };
   }
-  revalidatePath("/dashboard");
-  revalidatePath("/claims");
-  revalidatePath("/review-queue");
-  revalidatePath("/audit");
-  revalidatePath(`/claims/${reference}`);
-  revalidatePath(`/claims/${reference}/review`);
+  revalidateClaimWorkflow(reference);
+  return { success: true };
+}
+
+export async function decideClaim(
+  reference: string,
+  _previousState: ClaimWorkflowState,
+  formData: FormData,
+): Promise<ClaimWorkflowState> {
+  void _previousState;
+  await requireRole(["supervisor", "administrator"]);
+  const parsed = decisionSchema.safeParse({
+    outcome: formData.get("outcome"),
+    notes: formData.get("notes"),
+    approvedAmount: formData.get("approvedAmount"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the decision details." };
+  if (isDemoMode) return { success: true };
+
+  const supabase = await createClient();
+  const approvedAmount = parsed.data.outcome === "APPROVED" ? Number(parsed.data.approvedAmount) : null;
+  const { error } = await supabase.rpc("decide_claim", {
+    p_reference: reference,
+    p_outcome: parsed.data.outcome,
+    p_notes: parsed.data.notes,
+    p_approved_amount: approvedAmount,
+  });
+  if (error) {
+    console.error("[decideClaim] decision failed", { reference, error: error.message });
+    const expectedMessage = error.message.includes("Approved amount") || error.message.includes("Only a verified claim")
+      ? error.message
+      : null;
+    return { error: error.code === "PGRST202" ? "Apply the claim-decision migrations in Supabase first." : expectedMessage ?? "The claim decision could not be saved." };
+  }
+  revalidateClaimWorkflow(reference);
+  return { success: true };
+}
+
+export async function advanceClaimSettlement(
+  reference: string,
+  _previousState: ClaimWorkflowState,
+  formData: FormData,
+): Promise<ClaimWorkflowState> {
+  void _previousState;
+  await requireRole(["supervisor", "administrator"]);
+  const parsed = settlementSchema.safeParse({ status: formData.get("status") });
+  if (!parsed.success) return { error: "Select a valid settlement step." };
+  if (isDemoMode) return { success: true };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("advance_claim_settlement", {
+    p_reference: reference,
+    p_status: parsed.data.status,
+  });
+  if (error) {
+    console.error("[advanceClaimSettlement] transition failed", { reference, error: error.message });
+    return { error: error.code === "PGRST202" ? "Apply the claim-decision migrations in Supabase first." : "The settlement status could not be updated." };
+  }
+  revalidateClaimWorkflow(reference);
   return { success: true };
 }
 

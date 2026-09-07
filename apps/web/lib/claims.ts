@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { DEMO_CLAIMS } from "@/lib/demo";
 import { isDemoMode } from "@/lib/config";
 import { requireViewer } from "@/lib/auth";
-import type { ClaimDTO, ClaimStatus } from "@/lib/types";
+import type { ClaimDecisionDTO, ClaimDecisionOutcome, ClaimDTO, ClaimStatus } from "@/lib/types";
 
 type ClaimRow = {
   id: string; reference: string; patient_name: string; provider_name: string;
@@ -171,4 +171,26 @@ export const getClaimExtractedFields = cache(async (claimId: string): Promise<Ex
       documentName: document && "original_name" in document ? document.original_name as string : null,
     };
   });
+});
+
+export const getClaimDecision = cache(async (claimId: string): Promise<ClaimDecisionDTO | null> => {
+  await requireViewer();
+  if (isDemoMode) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("claim_decisions")
+    .select("outcome,approved_amount,notes,decided_at")
+    .eq("claim_id", claimId)
+    .maybeSingle();
+  if (error?.code === "PGRST205" || error?.code === "42P01") return null;
+  if (error) throw new Error("Unable to load the claim decision.");
+  if (!data) return null;
+  return {
+    outcome: data.outcome as ClaimDecisionOutcome,
+    approvedAmount: data.approved_amount == null
+      ? null
+      : `MUR ${Number(data.approved_amount).toLocaleString("en-MU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    notes: data.notes as string,
+    decidedAt: data.decided_at as string,
+  };
 });

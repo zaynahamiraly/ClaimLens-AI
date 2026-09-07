@@ -3,9 +3,27 @@ export type ClaimStatus =
   | "PROCESSING"
   | "REVIEW_REQUIRED"
   | "VERIFIED"
+  | "APPROVED"
+  | "REJECTED"
+  | "PAYMENT_PENDING"
+  | "PAID"
   | "PROCESSING_FAILED";
 
 export type VerificationState = {
+  success?: boolean;
+  error?: string;
+};
+
+export type ClaimDecisionOutcome = "APPROVED" | "REJECTED";
+
+export type ClaimDecisionDTO = {
+  outcome: ClaimDecisionOutcome;
+  approvedAmount: string | null;
+  notes: string;
+  decidedAt: string;
+};
+
+export type ClaimWorkflowState = {
   success?: boolean;
   error?: string;
 };

@@ -43,7 +43,7 @@ ClaimLens has two connected but separately evaluated parts.
 
 | Area | Current state | What it does |
 |---|---|---|
-| Next.js web application | Implemented and deployed | Signup, login, dashboards, claim submission, private uploads, queues, claim assignment, review access, verification, audit, analytics, and user administration |
+| Next.js web application | Implemented and deployed | Signup, login, dashboards, claim submission, private uploads, queues, assignment, verification, supervisor decisions, settlement tracking, audit, analytics, and user administration |
 | Supabase Auth | Implemented and live | Password authentication, email confirmation flow, secure sessions, account status, and automatic client profiles |
 | Role-based access control | Implemented and live | Client, Claims Officer, Supervisor, and Administrator permissions enforced in UI, Server Actions, database functions, and Row Level Security |
 | Supabase PostgreSQL | Implemented; processing migration ready to apply | Profiles, claims, document metadata, processing jobs, extracted fields, reviews, audit events, indexes, constraints, triggers, and security functions |
@@ -164,6 +164,8 @@ ClaimLens supports four roles.
 | Assign a claim to any active Claims Officer | No | No | Yes | Yes |
 | Review claims | No | Assigned claims | All claims | All claims |
 | Verify a claim | No | Assigned claims | All eligible claims | All eligible claims |
+| Approve or reject a claim | No | No | Verified claims | Verified claims |
+| Advance approved claims to pending/paid | No | No | Yes | Yes |
 | View operational audit trail | No | Yes | Yes | Yes |
 | View analytics | No | No | Yes | Yes |
 | Create, change, or deactivate users | No | No | No | Yes |
@@ -258,9 +260,13 @@ The current PostgreSQL enum contains these states:
 | `PROCESSING` | The claim is waiting for or undergoing document processing |
 | `REVIEW_REQUIRED` | Structured results require accountable human review |
 | `VERIFIED` | An authorised human has verified the claim |
+| `APPROVED` | A Supervisor or Administrator approved the verified claim |
+| `REJECTED` | A Supervisor or Administrator rejected the verified claim |
+| `PAYMENT_PENDING` | An approved claim has entered the settlement queue |
+| `PAID` | Settlement has been recorded as complete |
 | `PROCESSING_FAILED` | Processing failed in a controlled manner |
 
-New claims enter `PROCESSING` while their durable workflow runs. Successful text-based PDF extraction moves them to `REVIEW_REQUIRED`. A failed or legacy claim displays a Start/Retry processing control. Scanned or image-only documents fail explicitly instead of inventing values.
+The normal successful path is `PROCESSING → REVIEW_REQUIRED → VERIFIED → APPROVED → PAYMENT_PENDING → PAID`. Rejection is an explicit alternative outcome. Every transition is validated in PostgreSQL and written to the audit history.
 
 ## 10. Assignment and verification
 
@@ -286,6 +292,10 @@ The `verify_claim` function makes verification atomic:
 - a `CLAIM_VERIFIED` audit event is inserted.
 
 Putting these related operations in one PostgreSQL function prevents a verified status without its corresponding review and audit records.
+
+### Decision and settlement
+
+After verification, only Supervisors and Administrators can call `decide_claim`. They must approve or reject with notes, and approval also requires an amount that cannot exceed the claimed amount. The decision is stored in `claim_decisions`, shown to the client, and audited. An approved claim can then move only from `APPROVED` to `PAYMENT_PENDING`, and from `PAYMENT_PENDING` to `PAID`, through `advance_claim_settlement`.
 
 ## 11. Authentication and route protection
 
@@ -329,6 +339,7 @@ Supabase applies Row Level Security to profiles, claims, documents, reviews, aud
 | `claims` | Main business record | Reference, creator, client, assignee, patient, provider, amount, currency, status, warning count |
 | `claim_documents` | Metadata for private files | Claim, uploader, type, original name, storage path, MIME type, size |
 | `claim_reviews` | Human review record | Claim, reviewer, status, comments, start and finish times |
+| `claim_decisions` | Supervisor outcome | Claim, outcome, approved amount, notes, decision-maker, timestamp |
 | `audit_events` | Append-only business history | Claim or user subject, actor, event type, JSON metadata, timestamp |
 | `storage.objects` | Supabase-managed stored object metadata | Private bucket, path, owner, object metadata |
 
@@ -342,6 +353,7 @@ erDiagram
     PROFILES ||--o{ CLAIMS : assigned_to
     CLAIMS ||--o{ CLAIM_DOCUMENTS : contains
     CLAIMS ||--o{ CLAIM_REVIEWS : reviewed_by
+    CLAIMS ||--o| CLAIM_DECISIONS : receives
     CLAIMS ||--o{ AUDIT_EVENTS : records
     AUTH_USERS ||--o{ AUDIT_EVENTS : acts
 ```
@@ -355,6 +367,8 @@ erDiagram
 | `private.can_access_claim(uuid)` | Centralises claim visibility rules |
 | `public.assign_claim(text, uuid)` | Validates and records claim assignment |
 | `public.verify_claim(text)` | Atomically verifies the claim and records review/audit data |
+| `public.decide_claim(...)` | Atomically approves or rejects a verified claim |
+| `public.advance_claim_settlement(text, text)` | Enforces approved-to-pending-to-paid transitions |
 | `public.admin_update_user_profile(...)` | Allows administrators to change role/status and records the event |
 
 ### 12.4 Migration order
@@ -365,6 +379,8 @@ Run migrations in this order:
 2. `supabase/migrations/202608120002_production_hardening.sql`
 3. `supabase/migrations/202608130001_role_based_access.sql`
 4. `supabase/migrations/202609070001_claim_processing.sql`
+5. `supabase/migrations/202609070002_claim_decision_schema.sql`
+6. `supabase/migrations/202609070003_claim_decision_workflow.sql`
 
 The schema is changed through migrations rather than manual production edits, which makes the system reproducible and auditable.
 
@@ -703,7 +719,7 @@ Never commit `.env.local`. Never rename `SUPABASE_SECRET_KEY` to a `NEXT_PUBLIC_
 
 ### 25.4 Apply the database schema
 
-Use the Supabase SQL Editor to run the four migrations in order. Also configure:
+Use the Supabase SQL Editor to run the six migrations in order. Also configure:
 
 - Authentication Site URL;
 - allowed `/auth/callback` redirect URL;

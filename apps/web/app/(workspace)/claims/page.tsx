@@ -5,7 +5,10 @@ import { listClaims } from "@/lib/claims";
 import { requireViewer } from "@/lib/auth";
 import type { ClaimStatus } from "@/lib/types";
 
-const statuses = new Set<ClaimStatus>(["UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "VERIFIED", "PROCESSING_FAILED"]);
+const statuses = new Set<ClaimStatus>([
+  "UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "VERIFIED", "APPROVED", "REJECTED",
+  "PAYMENT_PENDING", "PAID", "PROCESSING_FAILED",
+]);
 
 export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ q?: string; created?: string; status?: string; mine?: string }> }) {
   const [{ q = "", created, status, mine }, viewer] = await Promise.all([searchParams, requireViewer()]);

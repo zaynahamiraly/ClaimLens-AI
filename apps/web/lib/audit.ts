@@ -15,6 +15,12 @@ function eventDetail(row: AuditRow) {
   if (row.event_type === "PROCESSING_FAILED" && typeof reason === "string") return reason;
   const fieldCount = row.metadata?.field_count;
   if (row.event_type === "PROCESSING_COMPLETED" && typeof fieldCount === "number") return `${fieldCount} fields extracted`;
+  const notes = row.metadata?.notes;
+  const amount = row.metadata?.approved_amount;
+  if (row.event_type === "CLAIM_APPROVED" && typeof notes === "string") {
+    return `${notes}${typeof amount === "number" ? ` · Approved MUR ${amount.toLocaleString("en-MU", { minimumFractionDigits: 2 })}` : ""}`;
+  }
+  if (row.event_type === "CLAIM_REJECTED" && typeof notes === "string") return notes;
   return null;
 }
 
