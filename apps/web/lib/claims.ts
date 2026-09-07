@@ -13,6 +13,25 @@ type ClaimRow = {
   warning_count: number; created_at: string; client_id: string | null; assigned_to: string | null;
 };
 
+export type ClaimProcessingDTO = {
+  id: string;
+  status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED" | "UNAVAILABLE";
+  workflowRunId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export type ExtractedFieldDTO = {
+  fieldName: string;
+  rawValue: string;
+  value: string;
+  confidence: number;
+  method: string;
+  pageNumber: number;
+  documentName: string | null;
+};
+
 function toDTO(row: ClaimRow, names: Map<string, string>): ClaimDTO {
   return {
     id: row.id,
@@ -101,4 +120,55 @@ export const getClaimDocument = cache(async (claimId: string) => {
   const { data: signed } = await supabase.storage.from("claim-documents").createSignedUrl(document.storage_path, 300);
   if (!signed?.signedUrl) return null;
   return { name: document.original_name as string, mimeType: document.mime_type as string, signedUrl: signed.signedUrl };
+});
+
+export const getClaimProcessing = cache(async (claimId: string): Promise<ClaimProcessingDTO | null> => {
+  await requireViewer();
+  if (isDemoMode) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("claim_processing_jobs")
+    .select("id,status,workflow_run_id,last_error,created_at,finished_at")
+    .eq("claim_id", claimId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error?.code === "PGRST205" || error?.code === "42P01") {
+    return { id: "", status: "UNAVAILABLE", workflowRunId: null, lastError: "Apply the claim-processing database migration before starting this workflow.", createdAt: "", finishedAt: null };
+  }
+  if (error) throw new Error("Unable to load claim processing status.");
+  if (!data) return null;
+  return {
+    id: data.id as string,
+    status: data.status as ClaimProcessingDTO["status"],
+    workflowRunId: data.workflow_run_id as string | null,
+    lastError: data.last_error as string | null,
+    createdAt: data.created_at as string,
+    finishedAt: data.finished_at as string | null,
+  };
+});
+
+export const getClaimExtractedFields = cache(async (claimId: string): Promise<ExtractedFieldDTO[]> => {
+  await requireViewer();
+  if (isDemoMode) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("claim_extracted_fields")
+    .select("field_name,raw_value,normalized_value,confidence,extraction_method,page_number,claim_documents(original_name)")
+    .eq("claim_id", claimId)
+    .order("field_name", { ascending: true });
+  if (error?.code === "PGRST205" || error?.code === "42P01") return [];
+  if (error) throw new Error("Unable to load extracted claim fields.");
+  return (data ?? []).map((row) => {
+    const document = Array.isArray(row.claim_documents) ? row.claim_documents[0] : row.claim_documents;
+    return {
+      fieldName: row.field_name as string,
+      rawValue: row.raw_value as string,
+      value: row.normalized_value as string,
+      confidence: Number(row.confidence),
+      method: row.extraction_method as string,
+      pageNumber: row.page_number as number,
+      documentName: document && "original_name" in document ? document.original_name as string : null,
+    };
+  });
 });

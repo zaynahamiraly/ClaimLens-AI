@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireRole, requireViewer } from "@/lib/auth";
+import { enqueueClaimProcessing } from "@/lib/claim-processing";
 import { createClient } from "@/lib/supabase/server";
 import { isDemoMode } from "@/lib/config";
 
@@ -81,9 +82,37 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
     return { error: "The documents could not be uploaded. No partial claim was retained." };
   }
 
+  try {
+    await enqueueClaimProcessing(claim.id, viewer.id);
+  } catch (error) {
+    console.error("[createClaim] processing enqueue failed", { claimId: claim.id, error: String(error) });
+  }
+
   revalidatePath("/dashboard");
   revalidatePath("/claims");
   redirect("/claims?created=1");
+}
+
+export async function retryClaimProcessing(reference: string) {
+  const viewer = await requireViewer();
+  if (isDemoMode) redirect(`/claims/${reference}`);
+
+  const supabase = await createClient();
+  const { data: claim, error } = await supabase
+    .from("claims")
+    .select("id,status")
+    .eq("reference", reference)
+    .maybeSingle();
+  if (error || !claim) throw new Error("Claim is not available for processing.");
+  if (!(["UPLOADED", "PROCESSING", "PROCESSING_FAILED"] as string[]).includes(claim.status)) {
+    throw new Error("Only pending or failed claims can be processed.");
+  }
+
+  await enqueueClaimProcessing(claim.id as string, viewer.id);
+  revalidatePath("/dashboard");
+  revalidatePath("/claims");
+  revalidatePath(`/claims/${reference}`);
+  redirect(`/claims/${reference}`);
 }
 
 export async function verifyClaim(reference: string) {

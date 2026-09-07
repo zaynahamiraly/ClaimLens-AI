@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { ArrowRight, CalendarDays, FileCheck2, FileText, ShieldCheck, UserRoundCheck } from "lucide-react";
+import { AlertCircle, ArrowRight, CalendarDays, FileCheck2, FileText, RefreshCw, ShieldCheck, UserRoundCheck } from "lucide-react";
 import { notFound } from "next/navigation";
 import { getClaimAudit } from "@/lib/audit";
 import { requireViewer } from "@/lib/auth";
-import { getClaim, getClaimDocument } from "@/lib/claims";
+import { getClaim, getClaimDocument, getClaimProcessing } from "@/lib/claims";
 import { canAssign, canReview } from "@/lib/permissions";
 import { listClaimsOfficers } from "@/lib/users";
 import { StatusPill } from "@/components/status-pill";
-import { assignClaim } from "../actions";
+import { assignClaim, retryClaimProcessing } from "../actions";
 
 export default async function ClaimDetailPage({ params }: { params: Promise<{ reference: string }> }) {
   const { reference } = await params;
@@ -15,13 +15,18 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
   if (!claim) notFound();
 
   const staff = canReview(viewer.role);
-  const [document, events, officers] = await Promise.all([
+  const [document, events, officers, processing] = await Promise.all([
     getClaimDocument(claim.id),
     getClaimAudit(claim.id),
     staff ? listClaimsOfficers() : Promise.resolve([]),
+    getClaimProcessing(claim.id),
   ]);
   const mayReview = staff && (viewer.role !== "claims_officer" || claim.assignedTo === viewer.id);
   const assignAction = assignClaim.bind(null, claim.reference);
+  const processAction = retryClaimProcessing.bind(null, claim.reference);
+  const processingActive = processing?.status === "QUEUED" || processing?.status === "RUNNING";
+  const processingUnavailable = processing?.status === "UNAVAILABLE";
+  const canStartProcessing = ["UPLOADED", "PROCESSING", "PROCESSING_FAILED"].includes(claim.status) && !processingActive && !processingUnavailable;
 
   return <div className="content">
     <div className="title-row"><div><Link className="back" href="/claims">← Claims</Link><p className="kicker">Claim details</p><h1>{claim.reference}</h1><p>{claim.patientName} · {claim.providerName}</p></div><div className="title-actions"><StatusPill status={claim.status} />{mayReview ? <Link className="primary" href={`/claims/${claim.reference}/review`}><FileCheck2 />Open review</Link> : null}</div></div>
@@ -30,6 +35,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
       <article className="detail-card"><UserRoundCheck /><div><span>Ownership</span><strong>{claim.clientName ?? "Staff-created claim"}</strong><small>Assigned to: {claim.assignedOfficerName ?? "Unassigned"}</small></div></article>
       <article className="detail-card"><CalendarDays /><div><span>Submitted</span><strong>{new Intl.DateTimeFormat("en-MU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(claim.createdAt))}</strong><small>{claim.warningCount} validation warnings</small></div></article>
     </section>
+    {["UPLOADED", "PROCESSING", "PROCESSING_FAILED"].includes(claim.status) ? <section className="assignment-card"><div>{processing?.status === "FAILED" || processingUnavailable || claim.status === "PROCESSING_FAILED" ? <AlertCircle /> : <RefreshCw />}<span><b>{processingUnavailable ? "Processing setup is incomplete." : processingActive ? "Document processing is running." : processing?.status === "FAILED" ? "Document processing failed." : "This claim needs document processing."}</b><small>{processing?.lastError ?? (processingActive ? "The durable workflow will continue even if you close this page." : "Start the extraction workflow to produce reviewable fields.")}</small></span></div><form action={processAction}><button className="primary" type="submit" disabled={!canStartProcessing}><RefreshCw />{processingUnavailable ? "Migration required" : processingActive ? "Processing…" : processing?.status === "FAILED" ? "Retry processing" : "Start processing"}</button></form></section> : null}
     {staff && !claim.assignedTo ? <section className="assignment-card"><div><ShieldCheck /><span><b>This claim is unassigned.</b><small>An officer must be assigned before officer verification.</small></span></div>{viewer.role === "claims_officer" ? <form action={assignAction}><button className="primary" type="submit">Assign to me <ArrowRight /></button></form> : null}</section> : null}
     {canAssign(viewer.role) ? <section className="assignment-card"><div><UserRoundCheck /><span><b>Assign claims officer</b><small>Supervisors and administrators control workload ownership.</small></span></div><form action={assignAction} className="assignment-form"><select name="assignee" defaultValue={claim.assignedTo ?? ""} required><option value="" disabled>Select officer</option>{officers.map((officer) => <option key={officer.id} value={officer.id}>{officer.displayName}</option>)}</select><button className="secondary" type="submit">Save assignment</button></form></section> : null}
     <section className="table-card"><div className="table-head"><div><h2>Audit history</h2><p>Immutable business events visible to your role.</p></div></div><div className="timeline">{events.length ? events.map((event) => <div key={event.id}><i /><span><b>{event.eventType.replaceAll("_", " ")}</b><small>{event.actorName} · {new Intl.DateTimeFormat("en-MU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.createdAt))}</small></span></div>) : <p>No audit events yet.</p>}</div></section>

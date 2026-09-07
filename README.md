@@ -46,16 +46,16 @@ ClaimLens has two connected but separately evaluated parts.
 | Next.js web application | Implemented and deployed | Signup, login, dashboards, claim submission, private uploads, queues, claim assignment, review access, verification, audit, analytics, and user administration |
 | Supabase Auth | Implemented and live | Password authentication, email confirmation flow, secure sessions, account status, and automatic client profiles |
 | Role-based access control | Implemented and live | Client, Claims Officer, Supervisor, and Administrator permissions enforced in UI, Server Actions, database functions, and Row Level Security |
-| Supabase PostgreSQL | Implemented and live | Profiles, claims, document metadata, reviews, audit events, indexes, constraints, triggers, and security functions |
+| Supabase PostgreSQL | Implemented; processing migration ready to apply | Profiles, claims, document metadata, processing jobs, extracted fields, reviews, audit events, indexes, constraints, triggers, and security functions |
 | Supabase Storage | Implemented and live | Private PDF/JPEG/PNG storage with short-lived signed document URLs |
 | Pipeline A research baseline | Implemented locally | PyMuPDF text extraction, regular expressions, deterministic normalisation, and field-by-field evaluation |
 | Synthetic golden dataset | Pilot implemented | One synthetic claim form, invoice, receipt, ground-truth JSON, hashes, and evidence bounding boxes |
 | FastAPI service | Foundation only in the committed release | Root and health endpoints; it is not yet used by the deployed Next.js application |
-| Live OCR/NLP worker | Not yet integrated | New production claims remain in `PROCESSING` until the planned document-processing service is connected |
+| Live document worker | Implemented; deployment pending | Vercel Workflow downloads private PDFs, extracts embedded text, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
 | Pipeline B | Research design frozen; implementation pending | Quality assessment, adaptive preprocessing, layout-aware OCR, hybrid NLP, validation, and evidence localisation |
 | Pipeline C / document VLM | Optional future experiment | Selective fallback for difficult or low-confidence documents |
 
-This distinction prevents an important viva mistake: the live application workflow is real, but the cloud OCR/NLP worker is not yet processing newly uploaded claims.
+This distinction prevents an important viva mistake: the deployable live worker now handles text-based PDFs, but scanned PDF pages and PNG/JPEG documents still require the planned OCR path.
 
 ## 3. Research problem and contribution
 
@@ -116,17 +116,17 @@ The intended extended architecture is:
 
 ```mermaid
 flowchart LR
-    W[Next.js web app] --> API[FastAPI orchestration API]
-    API --> DB[Supabase PostgreSQL]
-    API --> ST[Supabase Storage]
-    API --> AI[Document-processing pipeline]
+    W[Next.js web app] --> WF[Vercel Workflow]
+    WF --> DB[Supabase PostgreSQL]
+    WF --> ST[Supabase Storage]
+    WF --> AI[Document-processing pipeline]
     AI --> OCR[OCR and layout analysis]
     AI --> NLP[Rules plus NLP extraction]
     AI --> VAL[Normalisation and validation]
     VAL --> DB
 ```
 
-The committed FastAPI service currently provides only foundation endpoints. The deployed web application therefore uses Supabase directly. This was an intentional staged delivery choice: first stabilise authentication, claims, private uploads, RBAC, and auditability; then connect the document-processing service.
+The processing release uses Vercel Workflow for durable orchestration inside the Next.js deployment. Each submission creates a job, starts retryable processing steps, reads the private documents through a server-only Supabase client, persists extracted fields, and records lifecycle events. The FastAPI service remains a foundation for the later Python OCR/NLP research pipeline.
 
 ## 5. Technology choices
 
@@ -138,6 +138,8 @@ The committed FastAPI service currently provides only foundation endpoints. The 
 | Database | Supabase PostgreSQL | Relational constraints, migrations, indexes, PostgreSQL functions, and Row Level Security |
 | File storage | Supabase Storage | Private object bucket integrated with authentication policies |
 | Production hosting | Vercel | Managed Next.js builds, environment variables, HTTPS, and production aliases |
+| Durable processing | Vercel Workflow | Asynchronous, retryable steps that survive redirects, reloads, and individual request completion |
+| Live PDF extraction | unpdf / PDF.js | Serverless extraction of embedded text from digital PDFs with page, image-allocation, and timeout limits |
 | API foundation | FastAPI | Python-native orchestration layer suitable for later OCR/NLP integration |
 | Baseline PDF extraction | PyMuPDF | Fast deterministic access to embedded PDF text and PDF coordinates |
 | Baseline extraction | Python regular expressions and rules | Transparent, reproducible, and easy to compare against the proposed hybrid pipeline |
@@ -229,7 +231,11 @@ Accepted files are PDF, PNG, and JPEG, with a maximum application-level size of 
 
 8. Metadata is written to `claim_documents`.
 9. A `CLAIM_CREATED` audit event records the document count.
-10. The dashboard and claims pages are revalidated and the user is redirected to the claims queue.
+10. A `claim_processing_jobs` row is created and a durable Vercel Workflow run is enqueued.
+11. The user is redirected immediately; processing continues independently of the browser request.
+12. The worker records `PROCESSING_STARTED`, downloads each private PDF, extracts embedded text, and applies deterministic label and money rules.
+13. Extracted values and provenance are stored in `claim_extracted_fields`.
+14. Success changes the claim to `REVIEW_REQUIRED`; controlled failure changes it to `PROCESSING_FAILED` and stores a safe error message.
 
 ### 8.3 Failure compensation
 
@@ -254,7 +260,7 @@ The current PostgreSQL enum contains these states:
 | `VERIFIED` | An authorised human has verified the claim |
 | `PROCESSING_FAILED` | Processing failed in a controlled manner |
 
-New live claims currently enter `PROCESSING`. Because the cloud OCR/NLP worker is not yet connected, the application does not falsely generate extraction results or move them automatically to `REVIEW_REQUIRED`.
+New claims enter `PROCESSING` while their durable workflow runs. Successful text-based PDF extraction moves them to `REVIEW_REQUIRED`. A failed or legacy claim displays a Start/Retry processing control. Scanned or image-only documents fail explicitly instead of inventing values.
 
 ## 10. Assignment and verification
 
@@ -358,6 +364,7 @@ Run migrations in this order:
 1. `supabase/migrations/202608120001_web_mvp.sql`
 2. `supabase/migrations/202608120002_production_hardening.sql`
 3. `supabase/migrations/202608130001_role_based_access.sql`
+4. `supabase/migrations/202609070001_claim_processing.sql`
 
 The schema is changed through migrations rather than manual production edits, which makes the system reproducible and auditable.
 
@@ -432,7 +439,7 @@ Audit events record who performed an important action and when it happened. Curr
 - `USER_ROLE_CHANGED`;
 - `USER_STATUS_CHANGED`.
 
-Not every planned event is emitted by the current web release. The schema is ready for the later processing and correction workflow. Claim-specific history is shown on the claim page, while authorised staff can see recent operational events on `/audit`.
+Submission, assignment, processing, failure, completion, and verification events are emitted by the current web release. Correction-specific events remain part of the later correction workflow. Claim-specific history is shown on the claim page, while authorised staff can see recent operational events on `/audit`.
 
 ## 17. Web routes
 
@@ -501,6 +508,9 @@ ClaimLens AI/
 | `apps/web/app/signup/actions.ts` | Secure public signup without a client-controlled role |
 | `apps/web/app/(workspace)/claims/actions.ts` | Validation, reference generation, private upload, compensation, assignment, and verification calls |
 | `apps/web/lib/claims.ts` | RLS-backed claim queries and short-lived document URLs |
+| `apps/web/lib/claim-processing.ts` | Authorised, idempotent processing-job creation and workflow start |
+| `apps/web/workflows/claim-processing.ts` | Durable processing orchestration, PDF download/extraction, retries, completion, and failure recording |
+| `apps/web/lib/extraction-rules.ts` | Pure deterministic rules shared by production processing and the golden-data verification script |
 | `apps/web/app/(workspace)/admin/users/actions.ts` | Server-only Auth administration and role updates |
 | `supabase/migrations/202608130001_role_based_access.sql` | Roles, policies, triggers, assignment, verification, and admin functions |
 | `experiments/pipeline_a/baseline.py` | Transparent deterministic research baseline |
@@ -627,7 +637,7 @@ Both pipelines must process the same test claim packages. The final test set is 
 
 The review screen is intended to be the signature human-in-the-loop feature. It places the source document beside extracted fields, validation warnings, and evidence indicators.
 
-The current `ReviewWorkspace` is a synthetic UI demonstration for the golden example. It demonstrates the intended interaction:
+The `ReviewWorkspace` supports both the synthetic golden example and live fields loaded from `claim_extracted_fields`. It allows a reviewer to:
 
 - select an extracted field;
 - see its value and confidence presentation;
@@ -635,9 +645,9 @@ The current `ReviewWorkspace` is a synthetic UI demonstration for the golden exa
 - show a cross-document warning;
 - preserve the concept of evidence-linked predictions.
 
-The confidence percentages shown in this demonstration are synthetic interface values, not calibrated model probabilities or dissertation results.
+The current rule confidence values are method-level engineering indicators, not calibrated model probabilities or dissertation results.
 
-For ordinary live claims, the screen honestly reports that structured fields are not yet available and keeps verification disabled while status is `PROCESSING` or `UPLOADED`.
+For a live claim, verification remains disabled while status is `PROCESSING` or `UPLOADED`; after successful extraction the live values and source document link appear and the status becomes `REVIEW_REQUIRED`.
 
 The planned correction workflow will store the original prediction, corrected value, correction category, reviewer, and timestamp rather than overwriting the AI result.
 
@@ -693,7 +703,7 @@ Never commit `.env.local`. Never rename `SUPABASE_SECRET_KEY` to a `NEXT_PUBLIC_
 
 ### 25.4 Apply the database schema
 
-Use the Supabase SQL Editor to run the three migrations in order. Also configure:
+Use the Supabase SQL Editor to run the four migrations in order. Also configure:
 
 - Authentication Site URL;
 - allowed `/auth/callback` redirect URL;
@@ -784,7 +794,7 @@ Set-Location services\api
 
 Open <http://127.0.0.1:8000/docs> for FastAPI's generated OpenAPI interface.
 
-This service is not currently called by the production web app. Its next responsibility is to orchestrate processing jobs and the document-AI pipeline.
+This service is not currently called by the production web app. Vercel Workflow now runs the baseline production extraction; FastAPI remains the intended host for the heavier PaddleOCR/OpenCV/Python research pipeline.
 
 ## 28. Production deployment
 
@@ -844,14 +854,14 @@ Still required before the final dissertation release:
 
 Be direct about these in the viva:
 
-1. The live web application does not yet invoke the FastAPI service.
-2. Newly uploaded production documents are stored privately but are not yet processed by a cloud OCR/NLP worker.
-3. The rich review workspace is currently a synthetic golden-case demonstration.
+1. The live web application does not yet invoke the FastAPI service; baseline processing is implemented in Vercel Workflow.
+2. The production worker handles embedded PDF text but does not yet OCR scanned PDFs, PNGs, or JPEGs.
+3. The rich review workspace now shows live extracted values, but coordinate-level page highlighting remains part of the next evidence release.
 4. The baseline reads embedded PDF text and is not OCR for scanned images.
 5. Pipeline B is designed but not yet implemented and benchmarked.
 6. The dataset contains only one golden pilot package, so the pilot result cannot support general performance claims.
 7. Public confirmation email needs custom SMTP before arbitrary users can complete signup.
-8. Corrections, evidence records, OCR results, processing jobs, and model-run tables belong to the next processing release.
+8. Processing jobs and field provenance are implemented; correction history, OCR outputs, bounding boxes, and model-run tables remain future work.
 9. The current operational analytics are not AI-performance analytics.
 10. This is a synthetic academic prototype, not a medical or insurance decision system approved for real patient data.
 
@@ -924,7 +934,7 @@ Next.js supports Server Components for protected reads, Server Actions for mutat
 
 ### Why is FastAPI present if Next.js uses Supabase directly?
 
-Development is staged. The live workflow and security foundation were stabilised first. FastAPI is the planned orchestration layer for OCR/NLP jobs because the research stack is Python-based. The README does not pretend that this integration is already complete.
+Development is staged. Vercel Workflow now orchestrates the lightweight production baseline close to the Next.js application. FastAPI remains because the planned PaddleOCR, OpenCV, and NLP research pipeline is Python-based and heavier than the baseline serverless path.
 
 ### How is RBAC enforced?
 
@@ -1000,7 +1010,7 @@ Confirm that `SUPABASE_SECRET_KEY` exists in the Vercel Production environment a
 
 ### New claims stay in `PROCESSING`
 
-This is expected in the current live release. The cloud OCR/NLP worker has not yet been connected.
+Check the claim page for its processing card. A `QUEUED` or `RUNNING` job should complete asynchronously; refresh after a few seconds. If it shows `FAILED`, read the displayed safe error and use **Retry processing**. If an older claim has no job, use **Start processing**. Confirm that the fourth migration is applied, `SUPABASE_SECRET_KEY` exists in Vercel, and Workflow endpoints were included in the build.
 
 ### Supabase CLI database connection times out
 
@@ -1011,17 +1021,16 @@ The direct PostgreSQL pooler port may be blocked by the local network. Use the S
 The recommended order is:
 
 1. configure production SMTP and CAPTCHA for public registration;
-2. finalise the FastAPI processing API contract;
-3. add processing-job and model-run migrations;
-4. implement document classification and quality assessment;
-5. implement scanned-document OCR with provenance;
-6. freeze and benchmark Pipeline A on a larger dataset;
-7. implement Pipeline B extraction and normalisation;
-8. add validation and evidence tables;
-9. implement correction history and full review records;
-10. connect the worker to the live claim lifecycle;
-11. add Playwright and backend integration tests;
-12. freeze the final synthetic dataset and run dissertation experiments.
+2. apply and verify the processing migration in the production Supabase project;
+3. deploy the workflow-enabled Next.js build and run an end-to-end production claim;
+4. finalise the FastAPI OCR/NLP API contract;
+5. implement document classification and quality assessment;
+6. implement scanned-document OCR with coordinate provenance;
+7. freeze and benchmark Pipeline A on a larger dataset;
+8. implement Pipeline B extraction and normalisation;
+9. add correction history and richer validation/evidence tables;
+10. add Playwright and backend integration tests;
+11. freeze the final synthetic dataset and run dissertation experiments.
 
 Pipeline C/VLM remains optional until the core workflow and Pipeline B evaluation are stable.
 

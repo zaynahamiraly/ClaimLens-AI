@@ -1,0 +1,46 @@
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build/cache
+dist/
+build/
+coverage/
+
+# ClaimLens private data
+datasets/raw/*
+datasets/results/*
+!datasets/raw/.gitkeep
+!datasets/results/.gitkeep
+
+# Uploaded documents
+uploads/
+storage/
+.vercel
+.env*
+**/supabase/.temp/

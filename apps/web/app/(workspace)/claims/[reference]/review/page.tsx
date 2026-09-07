@@ -3,7 +3,7 @@ import { CheckCircle2, FileText } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
 import { StatusPill } from "@/components/status-pill";
-import { getClaim, getClaimDocument } from "@/lib/claims";
+import { getClaim, getClaimDocument, getClaimExtractedFields } from "@/lib/claims";
 import { requireRole } from "@/lib/auth";
 import { verifyClaim } from "../../actions";
 
@@ -21,9 +21,10 @@ export default async function ReviewPage({
   ]);
   if (!claim) notFound();
 
-  const [{ verified }, document] = await Promise.all([
+  const [{ verified }, document, extractedFields] = await Promise.all([
     searchParams,
     getClaimDocument(claim.id),
+    getClaimExtractedFields(claim.id),
   ]);
   const isGoldenDemo = reference === "CLM-2026-000142";
   const isVerified = claim.status === "VERIFIED" || verified === "1";
@@ -48,8 +49,17 @@ export default async function ReviewPage({
           </form>
         </div>
       </div>
-      {isGoldenDemo ? (
-        <ReviewWorkspace />
+      {isGoldenDemo || extractedFields.length ? (
+        <ReviewWorkspace
+          documentName={document?.name}
+          documentUrl={document?.signedUrl}
+          fields={isGoldenDemo ? undefined : extractedFields.map((field) => ({
+            label: field.fieldName.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase()),
+            value: field.value,
+            confidence: field.confidence,
+            source: `${field.documentName ?? "Claim document"}, page ${field.pageNumber}`,
+          }))}
+        />
       ) : (
         <div className="pending-review">
           <FileText />
