@@ -7,8 +7,16 @@ import type { AuditEventDTO } from "@/lib/types";
 
 type AuditRow = {
   id: string; event_type: string; created_at: string; actor_id: string;
-  claim_id: string | null; subject_user_id: string | null;
+  claim_id: string | null; subject_user_id: string | null; metadata: Record<string, unknown> | null;
 };
+
+function eventDetail(row: AuditRow) {
+  const reason = row.metadata?.reason;
+  if (row.event_type === "PROCESSING_FAILED" && typeof reason === "string") return reason;
+  const fieldCount = row.metadata?.field_count;
+  if (row.event_type === "PROCESSING_COMPLETED" && typeof fieldCount === "number") return `${fieldCount} fields extracted`;
+  return null;
+}
 
 async function hydrateAudit(rows: AuditRow[]): Promise<AuditEventDTO[]> {
   const supabase = await createClient();
@@ -27,6 +35,7 @@ async function hydrateAudit(rows: AuditRow[]): Promise<AuditEventDTO[]> {
     actorName: names.get(row.actor_id) ?? "System",
     claimReference: row.claim_id ? references.get(row.claim_id) ?? null : null,
     subjectName: row.subject_user_id ? names.get(row.subject_user_id) ?? "User" : null,
+    detail: eventDetail(row),
   }));
 }
 
@@ -35,7 +44,7 @@ export async function listAuditEvents(limit = 100) {
   if (isDemoMode) return [];
   const supabase = await createClient();
   const { data, error } = await supabase.from("audit_events")
-    .select("id,event_type,created_at,actor_id,claim_id,subject_user_id")
+    .select("id,event_type,created_at,actor_id,claim_id,subject_user_id,metadata")
     .order("created_at", { ascending: false }).limit(limit);
   if (error) throw new Error("Unable to load the audit trail.");
   return hydrateAudit(data as AuditRow[]);
@@ -46,7 +55,7 @@ export async function getClaimAudit(claimId: string) {
   if (isDemoMode) return [];
   const supabase = await createClient();
   const { data, error } = await supabase.from("audit_events")
-    .select("id,event_type,created_at,actor_id,claim_id,subject_user_id")
+    .select("id,event_type,created_at,actor_id,claim_id,subject_user_id,metadata")
     .eq("claim_id", claimId).order("created_at", { ascending: false });
   if (error) throw new Error("Unable to load claim history.");
   return hydrateAudit(data as AuditRow[]);

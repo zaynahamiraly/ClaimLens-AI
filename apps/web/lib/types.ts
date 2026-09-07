@@ -40,4 +40,5 @@ export type AuditEventDTO = {
   actorName: string;
   claimReference: string | null;
   subjectName: string | null;
+  detail: string | null;
 };
