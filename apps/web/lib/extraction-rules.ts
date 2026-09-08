@@ -23,14 +23,6 @@ function afterLabel(text: string, labels: string[]) {
   return null;
 }
 
-function claimedExpensesTotal(text: string) {
-  const heading = /(?:^|\n)\s*Claimed Expenses\s*(?:\n|$)/i.exec(text);
-  if (!heading || heading.index === undefined) return null;
-  const section = text.slice(heading.index + heading[0].length);
-  const declarationIndex = section.search(/(?:^|\n)\s*Declaration\b/i);
-  return afterLabel(declarationIndex >= 0 ? section.slice(0, declarationIndex) : section, ["Total"]);
-}
-
 function money(raw: string | null) {
   if (!raw) return null;
   const match = raw.match(/(?:MUR|Rs\.?|USD|EUR|GBP)?\s*([0-9][0-9, ]*(?:\.\d{2})?)/i);
@@ -41,8 +33,48 @@ function money(raw: string | null) {
 }
 
 function detectedCurrency(text: string) {
-  const match = text.match(/\b(MUR|USD|EUR|GBP)\b/i);
-  return match?.[1]?.toUpperCase() ?? "MUR";
+  const labelled = text.match(/\bcurrenc(?:y|ies)\b\s*(?::|-)?\s*([A-Z]{3})\b/i);
+  if (labelled?.[1]) return labelled[1].toUpperCase();
+  const nextToAmount = text.match(/(?:\b([A-Z]{3})\s+[0-9][0-9, ]*\.\d{2}\b|\b[0-9][0-9, ]*\.\d{2}\s+([A-Z]{3})\b)/);
+  return (nextToAmount?.[1] ?? nextToAmount?.[2])?.toUpperCase() ?? null;
+}
+
+type MonetaryCandidate = {
+  rawValue: string;
+  normalizedValue: string;
+  score: number;
+  documentId: string;
+};
+
+const totalContext = /\b(total|payable|due|reimburs(?:e|ement)|claim(?:ed)?|net\s+amount|settlement)\b/i;
+const nonAmountContext = /\b(date|reference|member|policy|phone|fax)\b/i;
+const monetaryValue = /(?:\b[A-Z]{3}\s+)?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}(?:\s+[A-Z]{3}\b)?/g;
+
+function rankedMonetaryCandidates(texts: TextDocument[]): MonetaryCandidate[] {
+  const candidates: MonetaryCandidate[] = [];
+  for (const entry of texts) {
+    const lines = entry.text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      for (const match of line.matchAll(monetaryValue)) {
+        const rawValue = match[0].trim();
+        const normalizedValue = money(rawValue);
+        if (!normalizedValue) continue;
+        const context = lines.slice(Math.max(0, index - 2), Math.min(lines.length, index + 2)).join(" ");
+        let score = 2;
+        if (totalContext.test(context)) score += 5;
+        if (/\btotal\b/i.test(context)) score += 3;
+        if (/\b[A-Z]{3}\b/.test(rawValue)) score += 2;
+        if (index >= Math.floor(lines.length * 0.6)) score += 1;
+        if (nonAmountContext.test(context) && !totalContext.test(context)) score -= 4;
+        candidates.push({ rawValue, normalizedValue, score, documentId: entry.documentId });
+      }
+    }
+  }
+  const largest = Math.max(...candidates.map((candidate) => Number(candidate.normalizedValue)));
+  return candidates
+    .map((candidate) => ({ ...candidate, score: candidate.score + (Number(candidate.normalizedValue) === largest ? 2 : 0) }))
+    .sort((left, right) => right.score - left.score || Number(right.normalizedValue) - Number(left.normalizedValue));
 }
 
 export function extractClaimFields(texts: TextDocument[]) {
@@ -67,13 +99,17 @@ export function extractClaimFields(texts: TextDocument[]) {
     }
   }
   if (!fields.some((field) => field.fieldName === "claimed_amount")) {
-    for (const entry of texts) {
-      const rawValue = claimedExpensesTotal(entry.text);
-      const normalizedValue = money(rawValue);
-      if (rawValue && normalizedValue) {
-        fields.push({ fieldName: "claimed_amount", rawValue, normalizedValue, confidence: 0.90, method: "claimed_expenses_total_rule", documentId: entry.documentId, pageNumber: 1 });
-        break;
-      }
+    const candidate = rankedMonetaryCandidates(texts)[0];
+    if (candidate && candidate.score >= 4) {
+      fields.push({
+        fieldName: "claimed_amount",
+        rawValue: candidate.rawValue,
+        normalizedValue: candidate.normalizedValue,
+        confidence: Math.min(0.94, 0.70 + candidate.score * 0.02),
+        method: "ranked_monetary_candidate",
+        documentId: candidate.documentId,
+        pageNumber: 1,
+      });
     }
   }
   const claimedAmount = fields.find((field) => field.fieldName === "claimed_amount")?.normalizedValue ?? null;

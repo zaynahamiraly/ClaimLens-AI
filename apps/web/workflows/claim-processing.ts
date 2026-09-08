@@ -12,7 +12,7 @@ type DocumentRow = {
 type ExtractionResult = {
   fields: RuleExtractedField[];
   claimedAmount: string;
-  currency: string;
+  currency: string | null;
   warningCount: number;
   documentCount: number;
   pageCount: number;
@@ -72,7 +72,7 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
 
   const parsed = extractClaimFields(texts.map((entry) => ({ documentId: entry.document.id, text: entry.text })));
   const claimedAmount = parsed.claimedAmount;
-  if (!claimedAmount) return { ok: false, reason: "Machine-readable text was found, but no claimed amount label/value could be recognised." };
+  if (!claimedAmount) return { ok: false, reason: "Machine-readable text was found, but no credible monetary total could be inferred from the document structure." };
   console.log("[claim-processing] extraction completed", { claimId, fieldCount: parsed.fields.length, documentCount: documents.length, pageCount });
   return { ok: true, result: {
       fields: parsed.fields,
@@ -103,8 +103,14 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
     if (error) throw new Error(`Could not save extracted fields: ${error.message}`);
   }
   const now = new Date().toISOString();
+  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED"; currency?: string } = {
+    claimed_amount: result.claimedAmount,
+    warning_count: result.warningCount,
+    status: "REVIEW_REQUIRED",
+  };
+  if (result.currency) claimUpdate.currency = result.currency;
   const [{ error: claimError }, { error: jobError }, { error: auditError }] = await Promise.all([
-    admin.from("claims").update({ claimed_amount: result.claimedAmount, currency: result.currency, warning_count: result.warningCount, status: "REVIEW_REQUIRED" }).eq("id", claimId),
+    admin.from("claims").update(claimUpdate).eq("id", claimId),
     admin.from("claim_processing_jobs").update({ status: "COMPLETED", finished_at: now, last_error: null }).eq("id", jobId),
     admin.from("audit_events").insert({ claim_id: claimId, actor_id: actorId, event_type: "PROCESSING_COMPLETED", metadata: { job_id: jobId, field_count: rows.length, document_count: result.documentCount, page_count: result.pageCount, warning_count: result.warningCount } }),
   ]);
