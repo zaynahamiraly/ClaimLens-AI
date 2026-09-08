@@ -196,6 +196,8 @@ Server exchanges the confirmation code for a session
 Client enters the protected dashboard
 ```
 
+For the simplest academic-demonstration flow, disable **Confirm email** in Supabase Authentication settings. Supabase then returns a session immediately and the application redirects the newly registered client straight to the dashboard. With confirmation enabled, the email step remains mandatory and cannot be bypassed by the browser.
+
 Security properties:
 
 - The signup form contains no role selector.

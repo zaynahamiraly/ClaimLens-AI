@@ -10,10 +10,6 @@ const signupSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
   email: z.email().trim().toLowerCase(),
   password: z.string().min(8).max(128),
-  confirmPassword: z.string(),
-}).refine((value) => value.password === value.confirmPassword, {
-  message: "Passwords do not match.",
-  path: ["confirmPassword"],
 });
 
 export type SignupState = { error?: string; success?: string };
@@ -25,10 +21,9 @@ export async function signup(_state: SignupState, formData: FormData): Promise<S
     displayName: formData.get("displayName"),
     email: formData.get("email"),
     password: formData.get("password"),
-    confirmPassword: formData.get("confirmPassword"),
   });
   if (!parsed.success) {
-    return { error: "Enter a valid name and email. Use at least 8 characters and make sure both passwords match." };
+    return { error: "Enter a valid name and email, and use a password of at least 8 characters." };
   }
 
   const requestHeaders = await headers();
@@ -47,10 +42,10 @@ export async function signup(_state: SignupState, formData: FormData): Promise<S
   });
 
   if (error) {
-    if (error.status === 429) return { error: "Too many registration attempts. Please wait and try again." };
+    if (error.status === 429) return { error: "Supabase temporarily limited registrations. If the account was already created, use Sign in. Otherwise wait before retrying." };
     return { error: "The account could not be created. Try signing in or use a different email address." };
   }
 
   if (data.session) redirect("/dashboard");
-  return { success: "Check your email to confirm your account, then sign in to start a claim." };
+  return { success: "Your account was created. Confirm it from the email, then use Sign in." };
 }
