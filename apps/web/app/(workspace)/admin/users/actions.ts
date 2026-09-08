@@ -12,7 +12,7 @@ const createSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
   email: z.email().trim().toLowerCase(),
   role: z.enum(roles),
-  password: z.string().min(12).max(128),
+  password: z.string().min(8).max(128),
 });
 
 const updateSchema = z.object({
@@ -33,7 +33,7 @@ export type UserSecurityState = { error?: string; success?: string; resetLink?: 
 export async function createUser(_state: UserActionState, formData: FormData): Promise<UserActionState> {
   await requireRole(["administrator"]);
   const parsed = createSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Enter a valid name, email, role, and temporary password of at least 12 characters." };
+  if (!parsed.success) return { error: "Enter a valid name, email, role, and temporary password of at least 8 characters." };
   if (isDemoMode) return { success: "Demo user created for this session." };
 
   const admin = createAdminClient();

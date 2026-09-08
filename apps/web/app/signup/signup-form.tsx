@@ -17,9 +17,9 @@ export function SignupForm() {
     {state.success ? <div className="auth-success" role="status"><ShieldCheck /> <span><b>Confirmation email sent</b>{state.success}</span></div> : <form action={action}>
       <label htmlFor="displayName">Full name<input id="displayName" name="displayName" autoComplete="name" minLength={2} maxLength={120} required /></label>
       <label htmlFor="email">Email address<input id="email" name="email" type="email" autoComplete="email" required /></label>
-      <label htmlFor="password">Password<input id="password" name="password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
-      <p className="password-hint">At least 12 characters with uppercase, lowercase, and a number.</p>
-      <label htmlFor="confirmPassword">Confirm password<input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
+      <label htmlFor="password">Password<input id="password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /></label>
+      <p className="password-hint">Use at least 8 characters.</p>
+      <label htmlFor="confirmPassword">Confirm password<input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /></label>
       {state.error ? <p className="auth-error" role="alert">{state.error}</p> : null}
       <button className="primary full" type="submit" disabled={pending}>{pending ? "Creating account…" : "Create client account"} <ArrowRight size={17} /></button>
     </form>}

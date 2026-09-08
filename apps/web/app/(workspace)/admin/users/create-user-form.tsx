@@ -14,7 +14,7 @@ export function CreateUserForm() {
       <label>Display name<input name="displayName" minLength={2} maxLength={120} required /></label>
       <label>Email<input name="email" type="email" autoComplete="off" required /></label>
       <label>Role<select name="role" defaultValue="client"><option value="client">Client</option><option value="claims_officer">Claims Officer</option><option value="supervisor">Supervisor</option><option value="administrator">Administrator</option></select></label>
-      <label>Temporary password<input name="password" type="password" minLength={12} maxLength={128} autoComplete="new-password" required /></label>
+      <label>Temporary password<input name="password" type="password" minLength={8} maxLength={128} autoComplete="new-password" required /></label>
     </div>
     {state.error ? <p className="auth-error" role="alert">{state.error}</p> : null}
     {state.success ? <p className="success-banner" role="status">{state.success}</p> : null}

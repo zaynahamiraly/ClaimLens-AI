@@ -9,12 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 const signupSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
   email: z.email().trim().toLowerCase(),
-  password: z.string()
-    .min(12)
-    .max(128)
-    .regex(/[a-z]/)
-    .regex(/[A-Z]/)
-    .regex(/[0-9]/),
+  password: z.string().min(8).max(128),
   confirmPassword: z.string(),
 }).refine((value) => value.password === value.confirmPassword, {
   message: "Passwords do not match.",
@@ -33,7 +28,7 @@ export async function signup(_state: SignupState, formData: FormData): Promise<S
     confirmPassword: formData.get("confirmPassword"),
   });
   if (!parsed.success) {
-    return { error: "Enter a valid name and email. Use 12+ characters with uppercase, lowercase, and a number, and make sure both passwords match." };
+    return { error: "Enter a valid name and email. Use at least 8 characters and make sure both passwords match." };
   }
 
   const requestHeaders = await headers();

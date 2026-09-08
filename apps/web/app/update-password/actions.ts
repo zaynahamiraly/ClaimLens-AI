@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 
 const passwordSchema = z.object({
-  password: z.string().min(12).max(128).regex(/[a-z]/).regex(/[A-Z]/).regex(/[0-9]/),
+  password: z.string().min(8).max(128),
   confirmPassword: z.string(),
 }).refine((value) => value.password === value.confirmPassword, { path: ["confirmPassword"] });
 
@@ -17,7 +17,7 @@ export async function updatePassword(_state: UpdatePasswordState, formData: Form
     password: formData.get("password"),
     confirmPassword: formData.get("confirmPassword"),
   });
-  if (!parsed.success) return { error: "Use 12+ characters with uppercase, lowercase, and a number, and make sure both passwords match." };
+  if (!parsed.success) return { error: "Use at least 8 characters and make sure both passwords match." };
 
   const supabase = await createClient();
   const { data: { user }, error: userError } = await supabase.auth.getUser();

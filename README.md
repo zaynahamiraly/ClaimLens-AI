@@ -200,7 +200,7 @@ Security properties:
 
 - The signup form contains no role selector.
 - The database trigger always assigns `client` to new public users.
-- Passwords must contain at least 12 characters, uppercase, lowercase, and a number.
+- Application forms require passwords of at least 8 characters; no character-class combination is required.
 - Email confirmation remains enabled.
 - Auth redirect URLs are restricted to the production callback and local-development callback.
 - Public users cannot promote themselves by changing browser requests because role changes require the administrator RPC and RLS permission.
