@@ -821,9 +821,17 @@ Set-Location services\api
 ..\..\.venv\Scripts\python -m uvicorn app.main:app --reload
 ```
 
+To install the development dependencies and run the backend tests:
+
+```powershell
+Set-Location services\api
+..\..\.venv\Scripts\python -m pip install -r requirements-dev.txt
+..\..\.venv\Scripts\python -m pytest
+```
+
 Open <http://127.0.0.1:8000/docs> for FastAPI's generated OpenAPI interface.
 
-This service is not currently called by the production web app. Vercel Workflow now runs the baseline production extraction; FastAPI remains the intended host for the heavier PaddleOCR/OpenCV/Python research pipeline.
+This service is not currently called by the production web app. Supabase migrations remain the authoritative application database schema. Vercel Workflow runs production extraction; FastAPI remains a tested foundation for the later PaddleOCR/OpenCV/Python research pipeline and must not introduce a second, conflicting database schema.
 
 ## 28. Production deployment
 

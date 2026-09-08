@@ -1,23 +1,29 @@
 from fastapi import FastAPI
 
+
+APP_NAME = "ClaimLens AI API"
+APP_VERSION = "0.2.0"
+
 app = FastAPI(
-    title="ClaimLens AI API",
-    description="Backend API for the AI-Assisted Health Insurance Claims Application",
-    version="0.1.0",
+    title=APP_NAME,
+    description="Backend API foundation for the ClaimLens AI research pipeline",
+    version=APP_VERSION,
 )
 
 
-@app.get("/")
-def root():
+@app.get("/", tags=["service"])
+def root() -> dict[str, str]:
     return {
-        "name": "ClaimLens AI API",
-        "version": "0.1.0",
+        "name": APP_NAME,
+        "version": APP_VERSION,
         "status": "running",
     }
 
 
-@app.get("/api/v1/health")
-def health_check():
+@app.get("/api/v1/health", tags=["service"])
+def health_check() -> dict[str, str]:
     return {
         "status": "healthy",
+        "service": APP_NAME,
+        "version": APP_VERSION,
     }
