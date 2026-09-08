@@ -43,7 +43,7 @@ ClaimLens has two connected but separately evaluated parts.
 
 | Area | Current state | What it does |
 |---|---|---|
-| Next.js web application | Implemented and deployed | Signup, login, dashboards, claim submission, private uploads, queues, assignment, verification, supervisor decisions, settlement tracking, audit, analytics, and user administration |
+| Next.js web application | Implemented and deployed | Signup, login, password recovery, dashboards, claim submission, private uploads, queues, assignment, verification, supervisor decisions, settlement tracking, audit, analytics, and user administration |
 | Supabase Auth | Implemented and live | Password authentication, email confirmation flow, secure sessions, account status, and automatic client profiles |
 | Role-based access control | Implemented and live | Client, Claims Officer, Supervisor, and Administrator permissions enforced in UI, Server Actions, database functions, and Row Level Security |
 | Supabase PostgreSQL | Implemented; processing migration ready to apply | Profiles, claims, document metadata, processing jobs, extracted fields, reviews, audit events, indexes, constraints, triggers, and security functions |
@@ -169,6 +169,8 @@ ClaimLens supports four roles.
 | View operational audit trail | No | Yes | Yes | Yes |
 | View analytics | No | No | Yes | Yes |
 | Create, change, or deactivate users | No | No | No | Yes |
+| Generate one-time password recovery links | No | No | No | Yes |
+| Delete another user's login account | No | No | No | Yes |
 
 The table describes both interface behavior and database enforcement. Hiding a menu item is not considered security.
 
@@ -300,6 +302,12 @@ After verification, only Supervisors and Administrators can call `decide_claim`.
 ## 11. Authentication and route protection
 
 Authentication is enforced in several layers.
+
+### Password recovery and account deletion
+
+An Administrator can generate a one-time Supabase recovery link from **Administration → User access**. The administrator sends that link through a trusted private channel. The link contains a hashed recovery token, establishes a temporary recovery session, and opens `/update-password`; only the user chooses the replacement password. The administrator never receives the old or new password.
+
+Account deletion requires the administrator to type the target email exactly. Self-deletion is blocked. The application first disables the workspace profile and then calls Supabase Auth soft deletion from a server-only client. This permanently removes login access while preserving the user's UUID references in claims and audit history. Deleted authentication accounts are omitted from the user-management table.
 
 ### Layer 1: Next.js proxy
 

@@ -27,8 +27,10 @@ export const listProfiles = cache(async (): Promise<ProfileDTO[]> => {
   const rows = profiles as ProfileRow[];
   const admin = createAdminClient();
   const { data: authData } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-  const emails = new Map(authData.users.map((user) => [user.id, user.email ?? "No email"]));
-  return rows.map((profile) => ({
+  const activeUsers = authData.users.filter((user) => !user.deleted_at);
+  const activeIds = new Set(activeUsers.map((user) => user.id));
+  const emails = new Map(activeUsers.map((user) => [user.id, user.email ?? "No email"]));
+  return rows.filter((profile) => activeIds.has(profile.id)).map((profile) => ({
     id: profile.id,
     email: emails.get(profile.id) ?? "No email",
     displayName: profile.display_name,
