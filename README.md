@@ -51,7 +51,7 @@ ClaimLens has two connected but separately evaluated parts.
 | Pipeline A research baseline | Implemented locally | PyMuPDF text extraction, regular expressions, deterministic normalisation, and field-by-field evaluation |
 | Synthetic golden dataset | Pilot implemented | One synthetic claim form, invoice, receipt, ground-truth JSON, hashes, and evidence bounding boxes |
 | FastAPI service | Foundation only in the committed release | Root and health endpoints; it is not yet used by the deployed Next.js application |
-| Live document worker | Implemented and deployed | Vercel Workflow processes every claim document, uses embedded PDF/DOCX text or AI Gateway OCR for scans and photos, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
+| Live document worker | Implemented and deployed | Vercel Workflow processes every claim document, uses embedded PDF/DOCX text or direct Google Gemini OCR for scans and photos, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
 | Pipeline B | Research design frozen; implementation pending | Quality assessment, adaptive preprocessing, layout-aware OCR, hybrid NLP, validation, and evidence localisation |
 | Pipeline C / document VLM | Optional future experiment | Selective fallback for difficult or low-confidence documents |
 
@@ -140,7 +140,7 @@ The processing release uses Vercel Workflow for durable orchestration inside the
 | Production hosting | Vercel | Managed Next.js builds, environment variables, HTTPS, and production aliases |
 | Durable processing | Vercel Workflow | Asynchronous, retryable steps that survive redirects, reloads, and individual request completion |
 | Live PDF extraction | unpdf / PDF.js | Serverless extraction of embedded text from digital PDFs with page, image-allocation, and timeout limits |
-| Live OCR fallback | Vercel AI SDK and AI Gateway | Vision-capable transcription of scanned PDFs and photos, with configurable model, spend controls, and request logs |
+| Live OCR fallback | Vercel AI SDK and Google Gemini | Vision-capable transcription of scanned PDFs and photos through a server-only Google AI Studio key; Vercel AI Gateway billing is not required |
 | DOCX extraction | Mammoth | Server-side extraction of machine-readable text from validated Word documents |
 | API foundation | FastAPI | Python-native orchestration layer suitable for later OCR/NLP integration |
 | Baseline PDF extraction | PyMuPDF | Fast deterministic access to embedded PDF text and PDF coordinates |
@@ -724,7 +724,8 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 SUPABASE_SECRET_KEY=your-server-secret-key
-CLAIM_OCR_MODEL=google/gemini-3.8-flash
+GOOGLE_GENERATIVE_AI_API_KEY=your-google-ai-studio-key
+CLAIM_OCR_MODEL=gemini-3.8-flash
 NEXT_PUBLIC_DEMO_MODE=false
 ```
 
@@ -851,9 +852,12 @@ Required Vercel variables:
 | `NEXT_PUBLIC_SITE_URL` | Public configuration | Canonical signup/auth callback base URL |
 | `NEXT_PUBLIC_DEMO_MODE` | Public configuration | Must be `false` in production |
 | `SUPABASE_SECRET_KEY` | Sensitive server-only | Administrator Auth operations |
-| `CLAIM_OCR_MODEL` | Optional server-only | AI Gateway model used for scanned PDF and image transcription; defaults to the documented production model |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Sensitive server-only | Direct Google Gemini authentication for scanned PDF and image transcription |
+| `CLAIM_OCR_MODEL` | Optional server-only | Direct Google model used for OCR; defaults to `gemini-3.8-flash` |
 
-Enable **AI Gateway** for the Vercel project and ensure it has available credits. Production deployments authenticate through Vercel OIDC automatically. For local OCR testing, run `vercel env pull .env.local` from `apps/web` to obtain a short-lived OIDC token.
+Create a Google AI Studio API key and save it only as `GOOGLE_GENERATIVE_AI_API_KEY` in Vercel. ClaimLens calls Google directly, so Vercel AI Gateway and Vercel billing are not required. Never expose this key through a `NEXT_PUBLIC_` variable or commit it to Git.
+
+The Google free tier may use submitted content to improve Google products. Use synthetic or properly de-identified documents for the dissertation demonstration. Do not process real patient health information through the free tier; a real healthcare deployment requires an approved data-processing and compliance arrangement.
 
 ### Supabase Auth URL configuration
 
@@ -895,7 +899,7 @@ Still required before the final dissertation release:
 Be direct about these in the viva:
 
 1. The live web application does not yet invoke the FastAPI service; baseline processing is implemented in Vercel Workflow.
-2. OCR fallback depends on AI Gateway availability, credits, and the configured multimodal model; provider failures are recorded as safe processing errors and can be retried.
+2. OCR fallback depends on Google Gemini availability and free-tier quota; provider failures are recorded as safe processing errors and can be retried.
 3. The rich review workspace now shows live extracted values, but coordinate-level page highlighting remains part of the next evidence release.
 4. The deterministic baseline itself reads embedded PDF/DOCX text; scanned-image transcription is a separate model-assisted fallback before the same rules run.
 5. Pipeline B is designed but not yet implemented and benchmarked.

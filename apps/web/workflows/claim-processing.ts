@@ -1,5 +1,6 @@
 import { extractText, getDocumentProxy } from "unpdf";
 import { APICallError, generateText } from "ai";
+import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
 import { extractClaimFields, type RuleExtractedField } from "@/lib/extraction-rules";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -27,14 +28,19 @@ type ExtractionOutcome =
 const MAX_PAGES_PER_DOCUMENT = 20;
 const EXTRACTION_TIMEOUT_MS = 25_000;
 const OCR_TIMEOUT_MS = 60_000;
-const DEFAULT_OCR_MODEL = "google/gemini-3.8-flash";
+const DEFAULT_OCR_MODEL = "gemini-3.8-flash";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
-  const model = process.env.CLAIM_OCR_MODEL?.trim() || DEFAULT_OCR_MODEL;
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error("OCR is not configured. Add the server-only GOOGLE_GENERATIVE_AI_API_KEY environment variable, then retry processing.");
+  }
+  const google = createGoogle({ apiKey });
+  const model = (process.env.CLAIM_OCR_MODEL?.trim() || DEFAULT_OCR_MODEL).replace(/^google\//, "");
   try {
     const { text } = await generateText({
-      model,
+      model: google(model),
       abortSignal: AbortSignal.timeout(OCR_TIMEOUT_MS),
       maxOutputTokens: 12_000,
       messages: [{
@@ -47,15 +53,12 @@ async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
           { type: "file", data: bytes, mediaType: document.mime_type, filename: document.original_name },
         ],
       }],
-      providerOptions: { gateway: { user: document.id, tags: ["feature:claim-ocr"] } },
     });
     return text.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim();
   } catch (error) {
-    if (error instanceof Error && error.name === "GatewayAuthenticationError") throw new Error("OCR authentication failed. Enable AI Gateway for this Vercel project, then retry processing.");
     if (APICallError.isInstance(error)) {
-      if (error.statusCode === 401 || error.statusCode === 403) throw new Error("OCR authentication failed. Enable AI Gateway for this Vercel project, then retry processing.");
-      if (error.statusCode === 402) throw new Error("The OCR budget is exhausted. Add AI Gateway credits, then retry processing.");
-      if (error.statusCode === 429) throw new Error("The OCR provider is temporarily rate limited. Wait briefly, then retry processing.");
+      if (error.statusCode === 400 || error.statusCode === 401 || error.statusCode === 403) throw new Error("Google OCR authentication failed. Check the server-only Google AI Studio API key, then retry processing.");
+      if (error.statusCode === 429) throw new Error("The free Google OCR quota is temporarily exhausted or rate limited. Wait and retry processing later.");
     }
     throw new Error(`OCR failed for ${document.original_name}: ${error instanceof Error ? error.message : String(error)}`);
   }
