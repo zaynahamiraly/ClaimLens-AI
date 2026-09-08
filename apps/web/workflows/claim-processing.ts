@@ -28,13 +28,15 @@ type ExtractionOutcome =
 const MAX_PAGES_PER_DOCUMENT = 20;
 const EXTRACTION_TIMEOUT_MS = 25_000;
 const OCR_TIMEOUT_MS = 60_000;
+const LOCAL_OCR_TIMEOUT_MS = 180_000;
+const MAX_LOCAL_OCR_PAGES = 10;
 const DEFAULT_OCR_MODEL = "gemini-3.8-flash";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
+async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
   if (!apiKey) {
-    throw new Error("OCR is not configured. Add the server-only GOOGLE_GENERATIVE_AI_API_KEY environment variable, then retry processing.");
+    throw new Error("The optional Google OCR key is not configured.");
   }
   const google = createGoogle({ apiKey });
   const model = (process.env.CLAIM_OCR_MODEL?.trim() || DEFAULT_OCR_MODEL).replace(/^google\//, "");
@@ -61,6 +63,64 @@ async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
       if (error.statusCode === 429) throw new Error("The free Google OCR quota is temporarily exhausted or rate limited. Wait and retry processing later.");
     }
     throw new Error(`OCR failed for ${document.original_name}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function transcribeLocally(document: DocumentRow, bytes: Uint8Array) {
+  const [{ pdf: renderPdf }, { createWorker }] = await Promise.all([
+    import("pdf-to-img"),
+    import("tesseract.js"),
+  ]);
+  const worker = await createWorker("eng", 1, { cachePath: "/tmp" });
+  try {
+    const recognition = async () => {
+      if (document.mime_type !== "application/pdf") {
+        const result = await worker.recognize(Buffer.from(bytes));
+        return result.data.text.trim();
+      }
+
+      const rendered = await renderPdf(bytes, { scale: 2, format: "png" });
+      try {
+        if (rendered.length > MAX_LOCAL_OCR_PAGES) {
+          throw new Error(`${document.original_name} exceeds the ${MAX_LOCAL_OCR_PAGES}-page local OCR limit.`);
+        }
+        const pages: string[] = [];
+        for await (const page of rendered) {
+          const result = await worker.recognize(page);
+          const text = result.data.text.trim();
+          if (text) pages.push(text);
+        }
+        return pages.join("\n\n");
+      } finally {
+        await rendered.destroy();
+      }
+    };
+
+    return await Promise.race([
+      recognition(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Local OCR timed out for ${document.original_name}.`)), LOCAL_OCR_TIMEOUT_MS)),
+    ]);
+  } finally {
+    await worker.terminate();
+  }
+}
+
+async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
+  const provider = process.env.CLAIM_OCR_PROVIDER?.trim().toLowerCase() || "local";
+  if (provider === "google") {
+    try {
+      return await transcribeWithGoogle(document, bytes);
+    } catch (error) {
+      console.warn("[claim-processing] Google OCR unavailable; using local OCR", {
+        documentId: document.id,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  try {
+    return await transcribeLocally(document, bytes);
+  } catch (error) {
+    throw new Error(`Local OCR failed for ${document.original_name}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
