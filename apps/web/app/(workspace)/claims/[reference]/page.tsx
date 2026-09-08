@@ -3,7 +3,7 @@ import { AlertCircle, ArrowRight, CalendarDays, CircleDollarSign, FileCheck2, Fi
 import { notFound } from "next/navigation";
 import { getClaimAudit } from "@/lib/audit";
 import { requireViewer } from "@/lib/auth";
-import { getClaim, getClaimDecision, getClaimDocument, getClaimProcessing } from "@/lib/claims";
+import { getClaim, getClaimDecision, getClaimDocuments, getClaimProcessing } from "@/lib/claims";
 import { canAssign, canReview } from "@/lib/permissions";
 import { listClaimsOfficers } from "@/lib/users";
 import { StatusPill } from "@/components/status-pill";
@@ -17,8 +17,8 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
   if (!claim) notFound();
 
   const staff = canReview(viewer.role);
-  const [document, events, officers, processing, decision] = await Promise.all([
-    getClaimDocument(claim.id),
+  const [documents, events, officers, processing, decision] = await Promise.all([
+    getClaimDocuments(claim.id),
     getClaimAudit(claim.id),
     staff ? listClaimsOfficers() : Promise.resolve([]),
     getClaimProcessing(claim.id),
@@ -37,10 +37,11 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
     <ProcessingAutoRefresh active={processingActive} />
     <div className="title-row"><div><Link className="back" href="/claims">← Claims</Link><p className="kicker">Claim details</p><h1>{claim.reference}</h1><p>{claim.patientName} · {claim.providerName}</p></div><div className="title-actions"><StatusPill status={claim.status} />{mayReview ? <Link className="primary" href={`/claims/${claim.reference}/review`}><FileCheck2 />Open review</Link> : null}</div></div>
     <section className="detail-grid">
-      <article className="detail-card"><FileText /><div><span>Claim amount</span><strong>{claim.amount}</strong><small>{document?.name ?? "Document processing pending"}</small></div>{document ? <a className="secondary" href={document.signedUrl} target="_blank" rel="noreferrer">Open document</a> : null}</article>
+      <article className="detail-card"><FileText /><div><span>Claim amount</span><strong>{claim.amount}</strong><small>{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} received` : "Document processing pending"}</small></div></article>
       <article className="detail-card"><UserRoundCheck /><div><span>Ownership</span><strong>{claim.clientName ?? "Staff-created claim"}</strong><small>Assigned to: {claim.assignedOfficerName ?? "Unassigned"}</small></div></article>
       <article className="detail-card"><CalendarDays /><div><span>Submitted</span><strong>{new Intl.DateTimeFormat("en-MU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(claim.createdAt))}</strong><small>{claim.warningCount} validation warnings</small></div></article>
     </section>
+    {documents.length ? <section className="claim-documents"><h2>Uploaded documents ({documents.length})</h2><div className="claim-document-list">{documents.map((document) => <a key={document.id} href={document.signedUrl} target="_blank" rel="noreferrer"><FileText />{document.name}</a>)}</div></section> : null}
     {decision ? <section className="decision-summary"><CircleDollarSign /><div><span>Claim decision</span><strong>{decision.outcome.replaceAll("_", " ")}</strong><p>{decision.notes}</p><small>{decision.approvedAmount ? `Approved amount: ${decision.approvedAmount} · ` : ""}{new Intl.DateTimeFormat("en-MU", { dateStyle: "medium", timeStyle: "short" }).format(new Date(decision.decidedAt))}</small></div></section> : null}
     {(viewer.role === "supervisor" || viewer.role === "administrator") && claim.status === "VERIFIED" ? <ClaimDecisionForm action={decisionAction} /> : null}
     {(viewer.role === "supervisor" || viewer.role === "administrator") && (claim.status === "APPROVED" || claim.status === "PAYMENT_PENDING") ? <SettlementControls action={settlementAction} status={claim.status} /> : null}

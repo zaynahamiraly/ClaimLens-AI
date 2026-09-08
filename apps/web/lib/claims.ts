@@ -105,21 +105,24 @@ export const getClaim = cache(async (reference: string): Promise<ClaimDTO | null
   return toDTO(row, names);
 });
 
-export const getClaimDocument = cache(async (claimId: string) => {
+export type ClaimDocumentDTO = { id: string; name: string; mimeType: string; signedUrl: string };
+
+export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDocumentDTO[]> => {
   await requireViewer();
-  if (isDemoMode) return null;
+  if (isDemoMode) return [];
   const supabase = await createClient();
-  const { data: document, error } = await supabase
+  const { data: documents, error } = await supabase
     .from("claim_documents")
-    .select("original_name,storage_path,mime_type")
+    .select("id,original_name,storage_path,mime_type")
     .eq("claim_id", claimId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (error || !document) return null;
-  const { data: signed } = await supabase.storage.from("claim-documents").createSignedUrl(document.storage_path, 300);
-  if (!signed?.signedUrl) return null;
-  return { name: document.original_name as string, mimeType: document.mime_type as string, signedUrl: signed.signedUrl };
+    .order("created_at", { ascending: true });
+  if (error || !documents?.length) return [];
+  const signedDocuments = await Promise.all(documents.map(async (document) => {
+    const { data: signed } = await supabase.storage.from("claim-documents").createSignedUrl(document.storage_path, 300);
+    if (!signed?.signedUrl) return null;
+    return { id: document.id as string, name: document.original_name as string, mimeType: document.mime_type as string, signedUrl: signed.signedUrl };
+  }));
+  return signedDocuments.filter((document): document is ClaimDocumentDTO => document !== null);
 });
 
 export const getClaimProcessing = cache(async (claimId: string): Promise<ClaimProcessingDTO | null> => {

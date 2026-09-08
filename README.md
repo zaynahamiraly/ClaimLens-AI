@@ -47,15 +47,15 @@ ClaimLens has two connected but separately evaluated parts.
 | Supabase Auth | Implemented and live | Password authentication, email confirmation flow, secure sessions, account status, and automatic client profiles |
 | Role-based access control | Implemented and live | Client, Claims Officer, Supervisor, and Administrator permissions enforced in UI, Server Actions, database functions, and Row Level Security |
 | Supabase PostgreSQL | Implemented; processing migration ready to apply | Profiles, claims, document metadata, processing jobs, extracted fields, reviews, audit events, indexes, constraints, triggers, and security functions |
-| Supabase Storage | Implemented and live | Private PDF/JPEG/PNG storage with short-lived signed document URLs |
+| Supabase Storage | Implemented and live | Private PDF/JPEG/PNG/DOCX storage with short-lived signed document URLs |
 | Pipeline A research baseline | Implemented locally | PyMuPDF text extraction, regular expressions, deterministic normalisation, and field-by-field evaluation |
 | Synthetic golden dataset | Pilot implemented | One synthetic claim form, invoice, receipt, ground-truth JSON, hashes, and evidence bounding boxes |
 | FastAPI service | Foundation only in the committed release | Root and health endpoints; it is not yet used by the deployed Next.js application |
-| Live document worker | Implemented; deployment pending | Vercel Workflow downloads private PDFs, extracts embedded text, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
+| Live document worker | Implemented and deployed | Vercel Workflow processes every claim document, uses embedded PDF/DOCX text or AI Gateway OCR for scans and photos, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
 | Pipeline B | Research design frozen; implementation pending | Quality assessment, adaptive preprocessing, layout-aware OCR, hybrid NLP, validation, and evidence localisation |
 | Pipeline C / document VLM | Optional future experiment | Selective fallback for difficult or low-confidence documents |
 
-This distinction prevents an important viva mistake: the deployable live worker now handles text-based PDFs, but scanned PDF pages and PNG/JPEG documents still require the planned OCR path.
+The live worker supports embedded PDF text, DOCX text, and OCR fallback for scanned PDFs, PNGs, and JPEGs. The broader Pipeline B research work—controlled preprocessing, layout coordinates, quality scoring, and formal evaluation—remains separate and is not claimed as complete.
 
 ## 3. Research problem and contribution
 
@@ -140,6 +140,8 @@ The processing release uses Vercel Workflow for durable orchestration inside the
 | Production hosting | Vercel | Managed Next.js builds, environment variables, HTTPS, and production aliases |
 | Durable processing | Vercel Workflow | Asynchronous, retryable steps that survive redirects, reloads, and individual request completion |
 | Live PDF extraction | unpdf / PDF.js | Serverless extraction of embedded text from digital PDFs with page, image-allocation, and timeout limits |
+| Live OCR fallback | Vercel AI SDK and AI Gateway | Vision-capable transcription of scanned PDFs and photos, with configurable model, spend controls, and request logs |
+| DOCX extraction | Mammoth | Server-side extraction of machine-readable text from validated Word documents |
 | API foundation | FastAPI | Python-native orchestration layer suitable for later OCR/NLP integration |
 | Baseline PDF extraction | PyMuPDF | Fast deterministic access to embedded PDF text and PDF coordinates |
 | Baseline extraction | Python regular expressions and rules | Transparent, reproducible, and easy to compare against the proposed hybrid pipeline |
@@ -561,7 +563,7 @@ Structured field dictionary with source text
 
 Pipeline A is deliberately simple and explainable. It reads the embedded text layer of the synthetic PDFs and uses rules such as label matching, date parsing, amount parsing, and known service-description detection.
 
-It is not yet a full OCR system. A scanned image without a text layer requires the future OCR path.
+The deployed worker supplements this deterministic baseline with a vision-capable OCR transcription fallback when a PDF has no embedded text or when the input is PNG/JPEG. OCR text is then passed into the same transparent normalisation and amount-selection rules; the model does not make the claim decision.
 
 ### 19.2 Pipeline B: proposed ClaimLens pipeline
 
@@ -722,6 +724,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
 SUPABASE_SECRET_KEY=your-server-secret-key
+CLAIM_OCR_MODEL=google/gemini-3.8-flash
 NEXT_PUBLIC_DEMO_MODE=false
 ```
 
@@ -729,7 +732,7 @@ Never commit `.env.local`. Never rename `SUPABASE_SECRET_KEY` to a `NEXT_PUBLIC_
 
 ### 25.4 Apply the database schema
 
-Use the Supabase SQL Editor to run the six migrations in order. Also configure:
+Use the Supabase SQL Editor to run all migrations in filename order. The DOCX migration expands the private bucket MIME allowlist. Also configure:
 
 - Authentication Site URL;
 - allowed `/auth/callback` redirect URL;
@@ -840,6 +843,9 @@ Required Vercel variables:
 | `NEXT_PUBLIC_SITE_URL` | Public configuration | Canonical signup/auth callback base URL |
 | `NEXT_PUBLIC_DEMO_MODE` | Public configuration | Must be `false` in production |
 | `SUPABASE_SECRET_KEY` | Sensitive server-only | Administrator Auth operations |
+| `CLAIM_OCR_MODEL` | Optional server-only | AI Gateway model used for scanned PDF and image transcription; defaults to the documented production model |
+
+Enable **AI Gateway** for the Vercel project and ensure it has available credits. Production deployments authenticate through Vercel OIDC automatically. For local OCR testing, run `vercel env pull .env.local` from `apps/web` to obtain a short-lived OIDC token.
 
 ### Supabase Auth URL configuration
 
@@ -881,13 +887,13 @@ Still required before the final dissertation release:
 Be direct about these in the viva:
 
 1. The live web application does not yet invoke the FastAPI service; baseline processing is implemented in Vercel Workflow.
-2. The production worker handles embedded PDF text but does not yet OCR scanned PDFs, PNGs, or JPEGs.
+2. OCR fallback depends on AI Gateway availability, credits, and the configured multimodal model; provider failures are recorded as safe processing errors and can be retried.
 3. The rich review workspace now shows live extracted values, but coordinate-level page highlighting remains part of the next evidence release.
-4. The baseline reads embedded PDF text and is not OCR for scanned images.
+4. The deterministic baseline itself reads embedded PDF/DOCX text; scanned-image transcription is a separate model-assisted fallback before the same rules run.
 5. Pipeline B is designed but not yet implemented and benchmarked.
 6. The dataset contains only one golden pilot package, so the pilot result cannot support general performance claims.
 7. Public confirmation email needs custom SMTP before arbitrary users can complete signup.
-8. Processing jobs and field provenance are implemented; correction history, OCR outputs, bounding boxes, and model-run tables remain future work.
+8. Processing jobs and document-level field provenance are implemented; correction history, coordinate-level bounding boxes, and dedicated model-run tables remain future work.
 9. The current operational analytics are not AI-performance analytics.
 10. This is a synthetic academic prototype, not a medical or insurance decision system approved for real patient data.
 

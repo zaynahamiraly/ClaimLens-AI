@@ -1,4 +1,4 @@
-export type TextDocument = { documentId: string; text: string };
+export type TextDocument = { documentId: string; text: string; method?: "pdf_text" | "docx_text" | "ocr" };
 
 export type RuleExtractedField = {
   fieldName: string;
@@ -33,9 +33,10 @@ function money(raw: string | null) {
 }
 
 function detectedCurrency(text: string) {
-  const labelled = text.match(/\bcurrenc(?:y|ies)\b\s*(?::|-)?\s*([A-Z]{3})\b/i);
+  const labelled = text.match(/\bcurrenc(?:y|ies)\b\s*(?::|-)?\s*([A-Z]{3})/i);
   if (labelled?.[1]) return labelled[1].toUpperCase();
-  const nextToAmount = text.match(/(?:\b([A-Z]{3})\s+[0-9][0-9, ]*\.\d{2}\b|\b[0-9][0-9, ]*\.\d{2}\s+([A-Z]{3})\b)/);
+  if (/\bRs\.?\s*\d/i.test(text)) return "MUR";
+  const nextToAmount = text.match(/(?:\b(MUR|USD|EUR|GBP)\s+[0-9][0-9, ]*\.\d{2}\b|\b[0-9][0-9, ]*\.\d{2}\s+(MUR|USD|EUR|GBP)\b)/i);
   return (nextToAmount?.[1] ?? nextToAmount?.[2])?.toUpperCase() ?? null;
 }
 
@@ -48,7 +49,7 @@ type MonetaryCandidate = {
 
 const totalContext = /\b(total|payable|due|reimburs(?:e|ement)|claim(?:ed)?|net\s+amount|settlement)\b/i;
 const nonAmountContext = /\b(date|reference|member|policy|phone|fax)\b/i;
-const monetaryValue = /(?:\b[A-Z]{3}\s+)?(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}(?:\s+[A-Z]{3}\b)?/g;
+const monetaryValue = /(?:(?:\b(?:MUR|USD|EUR|GBP)|Rs\.?)\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d{2})?|(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}(?:\s+(?:MUR|USD|EUR|GBP)\b)?)/gi;
 
 function rankedMonetaryCandidates(texts: TextDocument[]): MonetaryCandidate[] {
   const candidates: MonetaryCandidate[] = [];
@@ -84,8 +85,8 @@ export function extractClaimFields(texts: TextDocument[]) {
     { name: "provider_name", labels: ["Provider name", "Provider", "Facility"], normalise: (value: string | null) => value, confidence: 0.90 },
     { name: "invoice_number", labels: ["Invoice number", "Invoice no"], normalise: (value: string | null) => value, confidence: 0.95 },
     { name: "service_date", labels: ["Service date", "Date of service", "Treatment Date"], normalise: (value: string | null) => value, confidence: 0.91 },
-    { name: "invoice_total", labels: ["Invoice total", "Total amount", "Grand total"], normalise: money, confidence: 0.93 },
-    { name: "claimed_amount", labels: ["Claimed amount", "Claim amount", "Amount claimed", "Invoice total", "Grand total"], normalise: money, confidence: 0.92 },
+    { name: "invoice_total", labels: ["Invoice total", "Total amount", "Grand total", "Total"], normalise: money, confidence: 0.93 },
+    { name: "claimed_amount", labels: ["Claimed amount", "Claim amount", "Amount claimed", "Invoice total", "Grand total", "Total"], normalise: money, confidence: 0.92 },
   ];
   const fields: RuleExtractedField[] = [];
   for (const spec of specs) {
@@ -93,7 +94,7 @@ export function extractClaimFields(texts: TextDocument[]) {
       const rawValue = afterLabel(entry.text, spec.labels);
       const normalizedValue = spec.normalise(rawValue);
       if (rawValue && normalizedValue) {
-        fields.push({ fieldName: spec.name, rawValue, normalizedValue, confidence: spec.confidence, method: "label_rule", documentId: entry.documentId, pageNumber: 1 });
+        fields.push({ fieldName: spec.name, rawValue, normalizedValue, confidence: spec.confidence, method: `${entry.method ?? "pdf_text"}_label_rule`, documentId: entry.documentId, pageNumber: 1 });
         break;
       }
     }
@@ -106,7 +107,7 @@ export function extractClaimFields(texts: TextDocument[]) {
         rawValue: candidate.rawValue,
         normalizedValue: candidate.normalizedValue,
         confidence: Math.min(0.94, 0.70 + candidate.score * 0.02),
-        method: "ranked_monetary_candidate",
+        method: `${texts.find((entry) => entry.documentId === candidate.documentId)?.method ?? "pdf_text"}_ranked_monetary_candidate`,
         documentId: candidate.documentId,
         pageNumber: 1,
       });

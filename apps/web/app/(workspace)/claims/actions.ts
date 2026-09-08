@@ -12,7 +12,8 @@ import type { ClaimWorkflowState, VerificationState } from "@/lib/types";
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 const MAX_FILES = 3;
-const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg"]);
+const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg", DOCX_TYPE]);
 
 const claimSchema = z.object({
   patientName: z.string().trim().min(2, "Enter the patient name.").max(120),
@@ -51,6 +52,7 @@ async function hasValidSignature(file: File) {
   const bytes = new Uint8Array(await file.slice(0, 8).arrayBuffer());
   if (file.type === "application/pdf") return bytes.slice(0, 4).every((byte, index) => byte === [0x25, 0x50, 0x44, 0x46][index]);
   if (file.type === "image/png") return bytes.slice(0, 8).every((byte, index) => byte === [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a][index]);
+  if (file.type === DOCX_TYPE) return file.name.toLowerCase().endsWith(".docx") && bytes[0] === 0x50 && bytes[1] === 0x4b;
   return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 }
 
@@ -67,7 +69,7 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
   if (files.length < 1 || files.length > MAX_FILES) return { error: `Upload between 1 and ${MAX_FILES} documents.` };
   for (const file of files) {
     if (!allowedTypes.has(file.type) || file.size > MAX_FILE_SIZE || !(await hasValidSignature(file))) {
-      return { error: `${file.name} is not a valid PDF, PNG, or JPEG under 6 MB.` };
+      return { error: `${file.name} is not a valid PDF, PNG, JPEG, or DOCX under 6 MB.` };
     }
   }
 

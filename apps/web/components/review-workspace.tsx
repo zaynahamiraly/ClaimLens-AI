@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, ChevronRight, FileText, ShieldCheck, Sparkles } from "lucide-react";
+import type { ClaimDocumentDTO } from "@/lib/claims";
 
 type ReviewField = { label: string; value: string; confidence: number; source: string };
 
@@ -14,16 +15,25 @@ const demoFields: ReviewField[] = [
   { label: "Invoice total", value: "MUR 4,580.00", confidence: 0.94, source: "invoice.pdf, page 1" },
 ];
 
-export function ReviewWorkspace({ fields = demoFields, documentName = "invoice.pdf", documentUrl }: { fields?: ReviewField[]; documentName?: string; documentUrl?: string }) {
+export function ReviewWorkspace({ fields = demoFields, documents = [] }: { fields?: ReviewField[]; documents?: ClaimDocumentDTO[] }) {
   const [selected, setSelected] = useState(Math.max(fields.length - 1, 0));
+  const [activeDocument, setActiveDocument] = useState(0);
   const selectedField = fields[selected];
+  const document = documents[activeDocument];
+  const documentName = document?.name ?? "invoice.pdf";
+  const selectField = (index: number) => {
+    setSelected(index);
+    const matchingDocument = documents.findIndex((entry) => fields[index]?.source.startsWith(`${entry.name},`));
+    if (matchingDocument >= 0) setActiveDocument(matchingDocument);
+  };
   return <div className="review-grid">
     <section className="document">
-      <div className="doc-toolbar"><div><FileText /> {documentName}</div><span>Private evidence document</span></div>
-      <div className="paper">{documentUrl ? <>
+      <div className="doc-toolbar"><div><FileText /> {documentName}</div><span>{documents.length ? `${activeDocument + 1} of ${documents.length}` : "Private evidence document"}</span></div>
+      {documents.length > 1 ? <div className="review-document-tabs">{documents.map((entry, index) => <button type="button" key={entry.id} className={index === activeDocument ? "active" : ""} onClick={() => setActiveDocument(index)}>{entry.name}</button>)}</div> : null}
+      <div className="paper">{document ? <>
         <FileText /><h2>{documentName}</h2>
         <p>The source document is stored privately in Supabase. Open it beside the extracted fields to verify every value.</p>
-        <a className="secondary" href={documentUrl} target="_blank" rel="noreferrer">Open source document</a>
+        <a className="secondary" href={document.signedUrl} target="_blank" rel="noreferrer">Open source document</a>
       </> : <>
         <div className="paper-brand">Harbour Medical Centre<small>Synthetic Tax Invoice</small></div>
         <div className="paper-row"><b>Invoice number</b><span>INV-8522</span></div>
@@ -37,7 +47,7 @@ export function ReviewWorkspace({ fields = demoFields, documentName = "invoice.p
     <section className="extraction">
       <div className="extract-head"><div><span className="kicker">Pipeline A · completed</span><h2>Extracted fields</h2></div><span className="score"><Sparkles />{fields.length}</span></div>
       <div className="alert"><AlertTriangle /><div><b>Human verification required</b><p>Compare each prediction with the private source document before verification.</p></div></div>
-      <div className="field-list">{fields.map((field, index) => <button type="button" key={field.label} className={selected === index ? "selected" : ""} onClick={() => setSelected(index)}><div><span>{field.label}</span><b>{field.value}</b></div><small>{Math.round(field.confidence * 100)}%<ChevronRight /></small></button>)}</div>
+      <div className="field-list">{fields.map((field, index) => <button type="button" key={field.label} className={selected === index ? "selected" : ""} onClick={() => selectField(index)}><div><span>{field.label}</span><b>{field.value}</b></div><small>{Math.round(field.confidence * 100)}%<ChevronRight /></small></button>)}</div>
       {selectedField ? <div className="evidence"><ShieldCheck /><div><b>Evidence linked</b><p>Selected value was extracted from {selectedField.source}. The original prediction remains preserved.</p></div></div> : null}
     </section>
   </div>;

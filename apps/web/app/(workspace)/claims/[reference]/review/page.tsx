@@ -3,7 +3,7 @@ import { FileText } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
 import { VerificationControls } from "@/components/verification-controls";
-import { getClaim, getClaimDocument, getClaimExtractedFields } from "@/lib/claims";
+import { getClaim, getClaimDocuments, getClaimExtractedFields } from "@/lib/claims";
 import { requireRole } from "@/lib/auth";
 import { verifyClaim } from "../../actions";
 
@@ -21,9 +21,9 @@ export default async function ReviewPage({
   ]);
   if (!claim) notFound();
 
-  const [{ verified }, document, extractedFields] = await Promise.all([
+  const [{ verified }, documents, extractedFields] = await Promise.all([
     searchParams,
-    getClaimDocument(claim.id),
+    getClaimDocuments(claim.id),
     getClaimExtractedFields(claim.id),
   ]);
   const isGoldenDemo = reference === "CLM-2026-000142";
@@ -49,8 +49,7 @@ export default async function ReviewPage({
       </div>
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
-          documentName={document?.name}
-          documentUrl={document?.signedUrl}
+          documents={documents}
           fields={isGoldenDemo ? undefined : extractedFields.map((field) => ({
             label: field.fieldName.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase()),
             value: field.value,
@@ -61,13 +60,13 @@ export default async function ReviewPage({
       ) : (
         <div className="pending-review">
           <FileText />
-          <h2>{document?.name ?? "Documents received"}</h2>
+          <h2>{documents.length ? `${documents.length} document${documents.length === 1 ? "" : "s"} received` : "Documents received"}</h2>
           <p>
             {claim.status === "PROCESSING" || claim.status === "UPLOADED"
               ? "The document pipeline has not produced reviewable fields yet. Verification remains disabled."
               : "No structured field evidence is available for this claim."}
           </p>
-          {document ? <a className="secondary" href={document.signedUrl} target="_blank" rel="noreferrer">Open private document</a> : null}
+          {documents.length ? <div className="claim-document-list">{documents.map((document) => <a key={document.id} href={document.signedUrl} target="_blank" rel="noreferrer"><FileText />{document.name}</a>)}</div> : null}
         </div>
       )}
     </div>
