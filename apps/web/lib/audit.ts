@@ -14,7 +14,15 @@ function eventDetail(row: AuditRow) {
   const reason = row.metadata?.reason;
   if (row.event_type === "PROCESSING_FAILED" && typeof reason === "string") return reason;
   const fieldCount = row.metadata?.field_count;
-  if (row.event_type === "PROCESSING_COMPLETED" && typeof fieldCount === "number") return `${fieldCount} fields extracted`;
+  const automationConfidence = row.metadata?.automation_confidence;
+  const autoVerified = row.metadata?.auto_verified;
+  if (row.event_type === "PROCESSING_COMPLETED" && typeof fieldCount === "number") {
+    const confidence = typeof automationConfidence === "number" ? ` · ${Math.round(automationConfidence * 100)}% automation confidence` : "";
+    return `${fieldCount} fields extracted${confidence}`;
+  }
+  if (row.event_type === "CLAIM_VERIFIED" && autoVerified === true && typeof automationConfidence === "number") {
+    return `Automatically verified · ${Math.round(automationConfidence * 100)}% confidence · no validation warnings`;
+  }
   const notes = row.metadata?.notes;
   const amount = row.metadata?.approved_amount;
   if (row.event_type === "CLAIM_APPROVED" && typeof notes === "string") {

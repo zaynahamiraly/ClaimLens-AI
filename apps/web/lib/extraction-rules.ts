@@ -1,4 +1,4 @@
-export type TextDocument = { documentId: string; text: string; method?: "pdf_text" | "docx_text" | "ocr" };
+export type TextDocument = { documentId: string; text: string; method?: "pdf_text" | "docx_text" | "ocr"; sourceConfidence?: number };
 
 export type RuleExtractedField = {
   fieldName: string;
@@ -94,7 +94,10 @@ export function extractClaimFields(texts: TextDocument[]) {
       const rawValue = afterLabel(entry.text, spec.labels);
       const normalizedValue = spec.normalise(rawValue);
       if (rawValue && normalizedValue) {
-        fields.push({ fieldName: spec.name, rawValue, normalizedValue, confidence: spec.confidence, method: `${entry.method ?? "pdf_text"}_label_rule`, documentId: entry.documentId, pageNumber: 1 });
+        const confidence = entry.sourceConfidence == null
+          ? spec.confidence
+          : Math.min(spec.confidence, entry.sourceConfidence);
+        fields.push({ fieldName: spec.name, rawValue, normalizedValue, confidence, method: `${entry.method ?? "pdf_text"}_label_rule`, documentId: entry.documentId, pageNumber: 1 });
         break;
       }
     }
@@ -106,7 +109,11 @@ export function extractClaimFields(texts: TextDocument[]) {
         fieldName: "claimed_amount",
         rawValue: candidate.rawValue,
         normalizedValue: candidate.normalizedValue,
-        confidence: Math.min(0.94, 0.70 + candidate.score * 0.02),
+        confidence: Math.min(
+          0.94,
+          0.70 + candidate.score * 0.02,
+          texts.find((entry) => entry.documentId === candidate.documentId)?.sourceConfidence ?? 1,
+        ),
         method: `${texts.find((entry) => entry.documentId === candidate.documentId)?.method ?? "pdf_text"}_ranked_monetary_candidate`,
         documentId: candidate.documentId,
         pageNumber: 1,

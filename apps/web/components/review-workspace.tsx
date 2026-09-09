@@ -15,7 +15,7 @@ const demoFields: ReviewField[] = [
   { label: "Invoice total", value: "MUR 4,580.00", confidence: 0.94, source: "invoice.pdf, page 1" },
 ];
 
-export function ReviewWorkspace({ fields = demoFields, documents = [] }: { fields?: ReviewField[]; documents?: ClaimDocumentDTO[] }) {
+export function ReviewWorkspace({ fields = demoFields, documents = [], verified = false }: { fields?: ReviewField[]; documents?: ClaimDocumentDTO[]; verified?: boolean }) {
   const [selected, setSelected] = useState(Math.max(fields.length - 1, 0));
   const [activeDocument, setActiveDocument] = useState(0);
   const selectedField = fields[selected];
@@ -46,7 +46,7 @@ export function ReviewWorkspace({ fields = demoFields, documents = [] }: { field
     </section>
     <section className="extraction">
       <div className="extract-head"><div><span className="kicker">Pipeline A · completed</span><h2>Extracted fields</h2></div><span className="score"><Sparkles />{fields.length}</span></div>
-      <div className="alert"><AlertTriangle /><div><b>Human verification required</b><p>Compare each prediction with the private source document before verification.</p></div></div>
+      <div className="alert">{verified ? <ShieldCheck /> : <AlertTriangle />}<div><b>{verified ? "Verification completed" : "Human verification required"}</b><p>{verified ? "The evidence passed verification and is ready for a supervisor decision." : "Compare each prediction with the private source document before verification."}</p></div></div>
       <div className="field-list">{fields.map((field, index) => <button type="button" key={field.label} className={selected === index ? "selected" : ""} onClick={() => selectField(index)}><div><span>{field.label}</span><b>{field.value}</b></div><small>{Math.round(field.confidence * 100)}%<ChevronRight /></small></button>)}</div>
       {selectedField ? <div className="evidence"><ShieldCheck /><div><b>Evidence linked</b><p>Selected value was extracted from {selectedField.source}. The original prediction remains preserved.</p></div></div> : null}
     </section>

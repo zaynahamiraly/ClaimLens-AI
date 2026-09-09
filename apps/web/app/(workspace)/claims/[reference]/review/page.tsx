@@ -50,6 +50,7 @@ export default async function ReviewPage({
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
           documents={documents}
+          verified={isVerified}
           fields={isGoldenDemo ? undefined : extractedFields.map((field) => ({
             label: field.fieldName.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase()),
             value: field.value,

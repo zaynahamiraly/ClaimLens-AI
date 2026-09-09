@@ -29,7 +29,7 @@ export async function transcribeLocally(document: OcrDocument, bytes: Uint8Array
     const recognition = async () => {
       if (document.mime_type !== "application/pdf") {
         const result = await worker.recognize(Buffer.from(bytes));
-        return result.data.text.trim();
+        return { text: result.data.text.trim(), confidence: result.data.confidence / 100 };
       }
 
       const { pdf: renderPdf } = await import("pdf-to-img");
@@ -39,12 +39,21 @@ export async function transcribeLocally(document: OcrDocument, bytes: Uint8Array
           throw new Error(`${document.original_name} exceeds the ${MAX_LOCAL_OCR_PAGES}-page local OCR limit.`);
         }
         const pages: string[] = [];
+        const confidences: number[] = [];
         for await (const page of rendered) {
           const result = await worker.recognize(page);
           const text = result.data.text.trim();
-          if (text) pages.push(text);
+          if (text) {
+            pages.push(text);
+            confidences.push(result.data.confidence / 100);
+          }
         }
-        return pages.join("\n\n");
+        return {
+          text: pages.join("\n\n"),
+          confidence: confidences.length
+            ? confidences.reduce((total, value) => total + value, 0) / confidences.length
+            : 0,
+        };
       } finally {
         await rendered.destroy();
       }
@@ -54,7 +63,7 @@ export async function transcribeLocally(document: OcrDocument, bytes: Uint8Array
       recognition(),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Local OCR timed out for ${document.original_name}.`)), LOCAL_OCR_TIMEOUT_MS)),
     ]);
-    console.log("[local-ocr] recognition completed", { document: document.original_name, characters: text.length, elapsedMs: Date.now() - startedAt });
+    console.log("[local-ocr] recognition completed", { document: document.original_name, characters: text.text.length, confidence: text.confidence, elapsedMs: Date.now() - startedAt });
     return text;
   } finally {
     await worker.terminate();

@@ -2,6 +2,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { APICallError, generateText } from "ai";
 import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
+import { assessAutoVerification, autoVerificationThreshold } from "@/lib/auto-verification";
 import { extractClaimFields, type RuleExtractedField } from "@/lib/extraction-rules";
 import { transcribeLocally } from "@/lib/local-ocr";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -55,7 +56,10 @@ async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
         ],
       }],
     });
-    return text.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim();
+    return {
+      text: text.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/, "").trim(),
+      confidence: null,
+    };
   } catch (error) {
     if (APICallError.isInstance(error)) {
       if (error.statusCode === 400 || error.statusCode === 401 || error.statusCode === 403) throw new Error("Google OCR authentication failed. Check the server-only Google AI Studio API key, then retry processing.");
@@ -116,7 +120,7 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
   const documents = (data ?? []) as DocumentRow[];
   if (!documents.length) return { ok: false, reason: "No claim documents were found." };
 
-  const texts: Array<{ document: DocumentRow; text: string; method: "pdf_text" | "docx_text" | "ocr" }> = [];
+  const texts: Array<{ document: DocumentRow; text: string; method: "pdf_text" | "docx_text" | "ocr"; sourceConfidence: number | null }> = [];
   let pageCount = 0;
   for (const document of documents) {
     const { data: blob, error: downloadError } = await admin.storage.from("claim-documents").download(document.storage_path);
@@ -124,6 +128,7 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let text = "";
     let method: "pdf_text" | "docx_text" | "ocr" = "ocr";
+    let sourceConfidence: number | null = 1;
     if (document.mime_type === "application/pdf") {
       const pdf = await getDocumentProxy(bytes, { maxImageSize: 16_777_216 });
       if (pdf.numPages > MAX_PAGES_PER_DOCUMENT) return { ok: false, reason: `${document.original_name} exceeds the ${MAX_PAGES_PER_DOCUMENT}-page processing limit.` };
@@ -142,12 +147,21 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     } else {
       pageCount += 1;
     }
-    if (!text) text = await transcribeDocument(document, bytes);
-    if (text) texts.push({ document, text, method });
+    if (!text) {
+      const transcription = await transcribeDocument(document, bytes);
+      text = transcription.text;
+      sourceConfidence = transcription.confidence;
+    }
+    if (text) texts.push({ document, text, method, sourceConfidence });
   }
   if (!texts.length) return { ok: false, reason: "No readable text could be extracted from the uploaded documents." };
 
-  const parsed = extractClaimFields(texts.map((entry) => ({ documentId: entry.document.id, text: entry.text, method: entry.method })));
+  const parsed = extractClaimFields(texts.map((entry) => ({
+    documentId: entry.document.id,
+    text: entry.text,
+    method: entry.method,
+    sourceConfidence: entry.sourceConfidence ?? undefined,
+  })));
   const claimedAmount = parsed.claimedAmount;
   if (!claimedAmount) return { ok: false, reason: "Machine-readable text was found, but no credible monetary total could be inferred from the document structure." };
   console.log("[claim-processing] extraction completed", { claimId, fieldCount: parsed.fields.length, documentCount: documents.length, pageCount });
@@ -179,16 +193,48 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
     if (error) throw new Error(`Could not save extracted fields: ${error.message}`);
   }
   const now = new Date().toISOString();
-  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED"; currency?: string } = {
+  const automation = assessAutoVerification(result.fields, result.warningCount, autoVerificationThreshold());
+  const claimStatus: "REVIEW_REQUIRED" | "VERIFIED" = automation.eligible ? "VERIFIED" : "REVIEW_REQUIRED";
+  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string } = {
     claimed_amount: result.claimedAmount,
     warning_count: result.warningCount,
-    status: "REVIEW_REQUIRED",
+    status: claimStatus,
   };
   if (result.currency) claimUpdate.currency = result.currency;
+  const auditEvents = [{
+    claim_id: claimId,
+    actor_id: actorId,
+    event_type: "PROCESSING_COMPLETED",
+    metadata: {
+      job_id: jobId,
+      field_count: rows.length,
+      document_count: result.documentCount,
+      page_count: result.pageCount,
+      warning_count: result.warningCount,
+      automation_confidence: automation.confidence,
+      auto_verified: automation.eligible,
+    },
+  }];
+  if (automation.eligible) {
+    auditEvents.push({
+      claim_id: claimId,
+      actor_id: actorId,
+      event_type: "CLAIM_VERIFIED",
+      metadata: {
+        job_id: jobId,
+        field_count: rows.length,
+        document_count: result.documentCount,
+        page_count: result.pageCount,
+        warning_count: result.warningCount,
+        automation_confidence: automation.confidence,
+        auto_verified: true,
+      },
+    });
+  }
   const [{ error: claimError }, { error: jobError }, { error: auditError }] = await Promise.all([
     admin.from("claims").update(claimUpdate).eq("id", claimId),
     admin.from("claim_processing_jobs").update({ status: "COMPLETED", finished_at: now, last_error: null }).eq("id", jobId),
-    admin.from("audit_events").insert({ claim_id: claimId, actor_id: actorId, event_type: "PROCESSING_COMPLETED", metadata: { job_id: jobId, field_count: rows.length, document_count: result.documentCount, page_count: result.pageCount, warning_count: result.warningCount } }),
+    admin.from("audit_events").insert(auditEvents),
   ]);
   if (claimError || jobError || auditError) throw new Error(claimError?.message ?? jobError?.message ?? auditError?.message);
 }
