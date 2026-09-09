@@ -67,10 +67,18 @@ async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
 }
 
 async function transcribeLocally(document: DocumentRow, bytes: Uint8Array) {
-  const [{ pdf: renderPdf }, { createWorker }] = await Promise.all([
-    import("pdf-to-img"),
+  const [{ createWorker }, canvas] = await Promise.all([
     import("tesseract.js"),
+    import("@napi-rs/canvas"),
   ]);
+  for (const [name, value] of Object.entries({
+    DOMMatrix: canvas.DOMMatrix,
+    ImageData: canvas.ImageData,
+    Path2D: canvas.Path2D,
+  })) {
+    if (!(name in globalThis)) Object.defineProperty(globalThis, name, { configurable: true, value, writable: true });
+  }
+  const { pdf: renderPdf } = await import("pdf-to-img");
   const worker = await createWorker("eng", 1, { cachePath: "/tmp" });
   try {
     const recognition = async () => {
