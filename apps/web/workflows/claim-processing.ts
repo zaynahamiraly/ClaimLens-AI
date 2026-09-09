@@ -1,4 +1,5 @@
 import { extractText, getDocumentProxy } from "unpdf";
+import { createRequire } from "node:module";
 import { APICallError, generateText } from "ai";
 import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
@@ -79,7 +80,13 @@ async function transcribeLocally(document: DocumentRow, bytes: Uint8Array) {
     if (!(name in globalThis)) Object.defineProperty(globalThis, name, { configurable: true, value, writable: true });
   }
   const { pdf: renderPdf } = await import("pdf-to-img");
-  const worker = await createWorker("eng", 1, { cachePath: "/tmp" });
+  // The Workflow step compiler bundles Tesseract's default __dirname as a numeric
+  // module id. Resolve the worker from the deployed Node package at runtime so
+  // worker_threads always receives an absolute filesystem path.
+  const runtimeRequire = createRequire(`${process.cwd()}/package.json`);
+  const workerModule = ["tesseract.js", "src", "worker-script", "node", "index.js"].join("/");
+  const workerPath = runtimeRequire.resolve(workerModule);
+  const worker = await createWorker("eng", 1, { cachePath: "/tmp", workerPath });
   try {
     const recognition = async () => {
       if (document.mime_type !== "application/pdf") {
