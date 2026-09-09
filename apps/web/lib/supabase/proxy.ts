@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig, hasSupabaseConfig, isDemoMode } from "@/lib/config";
 
-const PUBLIC_ROUTES = new Set(["/login", "/signup", "/auth/callback", "/auth/recovery", "/api/health"]);
+const PUBLIC_ROUTES = new Set(["/login", "/signup", "/auth/callback", "/auth/recovery", "/api/health", "/api/internal/ocr"]);
 
 export async function updateSession(request: NextRequest) {
   if (isDemoMode || !hasSupabaseConfig) return NextResponse.next({ request });

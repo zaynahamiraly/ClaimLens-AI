@@ -4,7 +4,7 @@ import { withWorkflow } from "workflow/next";
 const nextConfig: NextConfig = {
   serverExternalPackages: ["@napi-rs/canvas", "tesseract.js", "tesseract.js-core"],
   outputFileTracingIncludes: {
-    "/.well-known/workflow/v1/step": [
+    "/api/internal/ocr": [
       "./node_modules/tesseract.js/src/worker-script/**/*",
       "./node_modules/tesseract.js-core/**/*",
       "./node_modules/wasm-feature-detect/**/*",

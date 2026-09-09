@@ -1,9 +1,9 @@
 import { extractText, getDocumentProxy } from "unpdf";
-import { createRequire } from "node:module";
 import { APICallError, generateText } from "ai";
 import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
 import { extractClaimFields, type RuleExtractedField } from "@/lib/extraction-rules";
+import { signInternalOcrRequest } from "@/lib/internal-ocr-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type DocumentRow = {
@@ -29,8 +29,7 @@ type ExtractionOutcome =
 const MAX_PAGES_PER_DOCUMENT = 20;
 const EXTRACTION_TIMEOUT_MS = 25_000;
 const OCR_TIMEOUT_MS = 60_000;
-const LOCAL_OCR_TIMEOUT_MS = 180_000;
-const MAX_LOCAL_OCR_PAGES = 10;
+const LOCAL_OCR_TIMEOUT_MS = 240_000;
 const DEFAULT_OCR_MODEL = "gemini-3.8-flash";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -67,57 +66,31 @@ async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
   }
 }
 
-async function transcribeLocally(document: DocumentRow, bytes: Uint8Array) {
-  const [{ createWorker }, canvas] = await Promise.all([
-    import("tesseract.js"),
-    import("@napi-rs/canvas"),
-  ]);
-  for (const [name, value] of Object.entries({
-    DOMMatrix: canvas.DOMMatrix,
-    ImageData: canvas.ImageData,
-    Path2D: canvas.Path2D,
-  })) {
-    if (!(name in globalThis)) Object.defineProperty(globalThis, name, { configurable: true, value, writable: true });
-  }
-  const { pdf: renderPdf } = await import("pdf-to-img");
-  // The Workflow step compiler bundles Tesseract's default __dirname as a numeric
-  // module id. Resolve the worker from the deployed Node package at runtime so
-  // worker_threads always receives an absolute filesystem path.
-  const runtimeRequire = createRequire(`${process.cwd()}/package.json`);
-  const workerModule = ["tesseract.js", "src", "worker-script", "node", "index.js"].join("/");
-  const workerPath = runtimeRequire.resolve(workerModule);
-  const worker = await createWorker("eng", 1, { cachePath: "/tmp", workerPath });
-  try {
-    const recognition = async () => {
-      if (document.mime_type !== "application/pdf") {
-        const result = await worker.recognize(Buffer.from(bytes));
-        return result.data.text.trim();
-      }
+function getInternalOcrUrl() {
+  const host = process.env.VERCEL_URL?.trim()
+    || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+    || process.env.NEXT_PUBLIC_SITE_URL?.trim();
+  if (!host) throw new Error("The application URL is unavailable for local OCR.");
+  const baseUrl = /^https?:\/\//i.test(host) ? host : `https://${host}`;
+  return `${baseUrl.replace(/\/$/, "")}/api/internal/ocr`;
+}
 
-      const rendered = await renderPdf(bytes, { scale: 2, format: "png" });
-      try {
-        if (rendered.length > MAX_LOCAL_OCR_PAGES) {
-          throw new Error(`${document.original_name} exceeds the ${MAX_LOCAL_OCR_PAGES}-page local OCR limit.`);
-        }
-        const pages: string[] = [];
-        for await (const page of rendered) {
-          const result = await worker.recognize(page);
-          const text = result.data.text.trim();
-          if (text) pages.push(text);
-        }
-        return pages.join("\n\n");
-      } finally {
-        await rendered.destroy();
-      }
-    };
-
-    return await Promise.race([
-      recognition(),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`Local OCR timed out for ${document.original_name}.`)), LOCAL_OCR_TIMEOUT_MS)),
-    ]);
-  } finally {
-    await worker.terminate();
-  }
+async function transcribeLocally(document: DocumentRow) {
+  const body = JSON.stringify({ documentId: document.id });
+  const timestamp = Date.now().toString();
+  const response = await fetch(getInternalOcrUrl(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-claimlens-timestamp": timestamp,
+      "x-claimlens-signature": signInternalOcrRequest(body, timestamp),
+    },
+    body,
+    signal: AbortSignal.timeout(LOCAL_OCR_TIMEOUT_MS),
+  });
+  const result = await response.json() as { text?: string; error?: string };
+  if (!response.ok) throw new Error(result.error || `OCR service returned HTTP ${response.status}.`);
+  return result.text?.trim() ?? "";
 }
 
 async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
@@ -133,7 +106,7 @@ async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
     }
   }
   try {
-    return await transcribeLocally(document, bytes);
+    return await transcribeLocally(document);
   } catch (error) {
     throw new Error(`Local OCR failed for ${document.original_name}: ${error instanceof Error ? error.message : String(error)}`);
   }
