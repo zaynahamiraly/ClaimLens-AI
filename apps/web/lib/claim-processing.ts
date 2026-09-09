@@ -6,12 +6,14 @@ import { claimProcessingWorkflow } from "@/workflows/claim-processing";
 
 export async function enqueueClaimProcessing(claimId: string, actorId: string) {
   const admin = createAdminClient();
-  const { data: existing } = await admin
+  const { data: existing, error: existingError } = await admin
     .from("claim_processing_jobs")
     .select("id,workflow_run_id,status")
     .eq("claim_id", claimId)
     .in("status", ["QUEUED", "RUNNING"])
+    .limit(1)
     .maybeSingle();
+  if (existingError) throw new Error(`Could not check processing jobs: ${existingError.message}`);
 
   if (existing) return existing;
 

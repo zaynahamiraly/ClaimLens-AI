@@ -67,9 +67,9 @@ async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
 }
 
 function getInternalOcrUrl() {
-  const host = process.env.VERCEL_URL?.trim()
+  const host = process.env.NEXT_PUBLIC_SITE_URL?.trim()
     || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
-    || process.env.NEXT_PUBLIC_SITE_URL?.trim();
+    || process.env.VERCEL_URL?.trim();
   if (!host) throw new Error("The application URL is unavailable for local OCR.");
   const baseUrl = /^https?:\/\//i.test(host) ? host : `https://${host}`;
   return `${baseUrl.replace(/\/$/, "")}/api/internal/ocr`;
@@ -88,9 +88,18 @@ async function transcribeLocally(document: DocumentRow) {
     body,
     signal: AbortSignal.timeout(LOCAL_OCR_TIMEOUT_MS),
   });
-  const result = await response.json() as { text?: string; error?: string };
-  if (!response.ok) throw new Error(result.error || `OCR service returned HTTP ${response.status}.`);
-  return result.text?.trim() ?? "";
+  const rawResult = await response.text();
+  let result: unknown = rawResult;
+  try {
+    result = JSON.parse(rawResult);
+  } catch {
+    // Keep the response text so an HTML or plain-text platform error is visible.
+  }
+  if (!response.ok) throw new Error(`OCR service returned HTTP ${response.status}: ${errorMessage(result)}`);
+  if (!result || typeof result !== "object" || typeof (result as { text?: unknown }).text !== "string") {
+    throw new Error("OCR service returned an invalid response.");
+  }
+  return (result as { text: string }).text.trim();
 }
 
 async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
@@ -117,12 +126,20 @@ async function markStarted(jobId: string, claimId: string, actorId: string) {
   console.log("[claim-processing] starting", { jobId, claimId });
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const [{ error: jobError }, { error: claimError }, { error: auditError }] = await Promise.all([
-    admin.from("claim_processing_jobs").update({ status: "RUNNING", started_at: now, attempt_count: 1, last_error: null }).eq("id", jobId),
+  const { data: startedJob, error: jobError } = await admin
+    .from("claim_processing_jobs")
+    .update({ status: "RUNNING", started_at: now, attempt_count: 1, last_error: null })
+    .eq("id", jobId)
+    .eq("status", "QUEUED")
+    .select("id")
+    .maybeSingle();
+  if (jobError) throw new Error(jobError.message);
+  if (!startedJob) return;
+  const [{ error: claimError }, { error: auditError }] = await Promise.all([
     admin.from("claims").update({ status: "PROCESSING" }).eq("id", claimId),
     admin.from("audit_events").insert({ claim_id: claimId, actor_id: actorId, event_type: "PROCESSING_STARTED", metadata: { job_id: jobId, pipeline: "A", pipeline_version: "1.0.0" } }),
   ]);
-  if (jobError || claimError || auditError) throw new Error(jobError?.message ?? claimError?.message ?? auditError?.message);
+  if (claimError || auditError) throw new Error(claimError?.message ?? auditError?.message);
 }
 
 async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
@@ -183,6 +200,8 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     } };
 }
 
+extractDocuments.maxRetries = 0;
+
 async function saveCompleted(jobId: string, claimId: string, actorId: string, result: ExtractionResult) {
   "use step";
   console.log("[claim-processing] saving completed result", { jobId, claimId, fieldCount: result.fields.length });
@@ -235,6 +254,7 @@ function errorMessage(error: unknown): string {
     const value = error as Record<string, unknown>;
     if (typeof value.message === "string" && value.message.trim()) return value.message;
     if (typeof value.reason === "string" && value.reason.trim()) return value.reason;
+    if (typeof value.error === "string" && value.error.trim()) return value.error;
     if (value.cause !== undefined) return errorMessage(value.cause);
     try {
       const serialized = JSON.stringify(value);
