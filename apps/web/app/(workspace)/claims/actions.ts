@@ -34,7 +34,10 @@ const settlementSchema = z.object({
 const identityCorrectionSchema = z.object({
   patientName: z.string().trim().min(2).max(120).optional(),
   providerName: z.string().trim().min(2).max(160).optional(),
-}).refine((value) => value.patientName || value.providerName, "Enter the missing information.");
+  claimedAmount: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/).optional(),
+  claimedCurrency: z.enum(["MUR", "UGX", "KES", "TZS", "USD", "EUR", "GBP"]).optional(),
+}).refine((value) => value.patientName || value.providerName || value.claimedAmount, "Enter the missing information.")
+  .refine((value) => !value.claimedAmount || value.claimedCurrency, "Select the amount currency.");
 
 export type ClaimFormState = { error?: string };
 export type IdentityCorrectionState = { success?: boolean; error?: string };
@@ -171,6 +174,8 @@ export async function correctClaimIdentity(
   const parsed = identityCorrectionSchema.safeParse({
     patientName: formData.get("patientName")?.toString() || undefined,
     providerName: formData.get("providerName")?.toString() || undefined,
+    claimedAmount: formData.get("claimedAmount")?.toString() || undefined,
+    claimedCurrency: formData.get("claimedCurrency")?.toString() || undefined,
   });
   if (!parsed.success) return { error: "Enter at least two characters for each missing field." };
   if (isDemoMode) return { success: true };
@@ -178,26 +183,30 @@ export async function correctClaimIdentity(
   const supabase = await createClient();
   const { data: claim, error: claimError } = await supabase
     .from("claims")
-    .select("id,status,patient_name,provider_name")
+    .select("id,status,patient_name,provider_name,claimed_amount")
     .eq("reference", reference)
     .maybeSingle();
   if (claimError || !claim || claim.status !== "REVIEW_REQUIRED") {
     return { error: "Missing information can only be supplied during human review." };
   }
 
-  const updates: { patient_name?: string; provider_name?: string } = {};
+  const updates: { patient_name?: string; provider_name?: string; claimed_amount?: number; currency?: string } = {};
   if (parsed.data.patientName) updates.patient_name = parsed.data.patientName;
   if (parsed.data.providerName) updates.provider_name = parsed.data.providerName;
+  if (parsed.data.claimedAmount && parsed.data.claimedCurrency) {
+    updates.claimed_amount = Number(parsed.data.claimedAmount);
+    updates.currency = parsed.data.claimedCurrency;
+  }
   const { error: updateError } = await supabase.from("claims").update(updates).eq("id", claim.id);
   if (updateError) return { error: "The missing information could not be saved." };
 
-  const events = Object.entries(updates).map(([fieldName, value]) => ({
+  const events = Object.entries(updates).filter(([fieldName]) => fieldName !== "currency").map(([fieldName, value]) => ({
     claim_id: claim.id,
     actor_id: viewer.id,
     event_type: "FIELD_CORRECTED",
     metadata: {
       field_name: fieldName,
-      previous_value: fieldName === "patient_name" ? claim.patient_name : claim.provider_name,
+      previous_value: fieldName === "patient_name" ? claim.patient_name : fieldName === "provider_name" ? claim.provider_name : claim.claimed_amount,
       corrected_value: value,
       source: "human_entry",
     },

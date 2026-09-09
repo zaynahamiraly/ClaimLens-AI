@@ -16,7 +16,7 @@ type DocumentRow = {
 
 type ExtractionResult = {
   fields: RuleExtractedField[];
-  claimedAmount: string;
+  claimedAmount: string | null;
   currency: string | null;
   warningCount: number;
   documentCount: number;
@@ -163,13 +163,12 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     sourceConfidence: entry.sourceConfidence ?? undefined,
   })));
   const claimedAmount = parsed.claimedAmount;
-  if (!claimedAmount) return { ok: false, reason: "Machine-readable text was found, but no credible monetary total could be inferred from the document structure." };
   console.log("[claim-processing] extraction completed", { claimId, fieldCount: parsed.fields.length, documentCount: documents.length, pageCount });
   return { ok: true, result: {
       fields: parsed.fields,
       claimedAmount,
       currency: parsed.currency,
-      warningCount: parsed.warningCount,
+      warningCount: parsed.warningCount + (claimedAmount ? 0 : 1),
       documentCount: documents.length,
       pageCount,
     } };
@@ -197,11 +196,11 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
   const claimStatus: "REVIEW_REQUIRED" | "VERIFIED" = automation.eligible ? "VERIFIED" : "REVIEW_REQUIRED";
   const patientName = result.fields.find((field) => field.fieldName === "patient_name")?.normalizedValue;
   const providerName = result.fields.find((field) => field.fieldName === "provider_name")?.normalizedValue;
-  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string; patient_name?: string; provider_name?: string } = {
-    claimed_amount: result.claimedAmount,
+  const claimUpdate: { claimed_amount?: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string; patient_name?: string; provider_name?: string } = {
     warning_count: result.warningCount,
     status: claimStatus,
   };
+  if (result.claimedAmount) claimUpdate.claimed_amount = result.claimedAmount;
   if (result.currency) claimUpdate.currency = result.currency;
   if (patientName) claimUpdate.patient_name = patientName;
   if (providerName) claimUpdate.provider_name = providerName;

@@ -29,12 +29,14 @@ export default async function ReviewPage({
   ]);
   const isGoldenDemo = reference === "CLM-2026-000142";
   const isVerified = claim.status === "VERIFIED" || verified === "1";
+  const patientMissing = claim.patientName === "Pending extraction";
+  const providerMissing = claim.providerName === "Pending extraction";
+  const amountMissing = claim.amount === "Pending extraction";
   const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
+    || patientMissing || providerMissing || amountMissing
     || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
   const verificationAction = verifyClaim.bind(null, claim.reference);
   const correctionAction = correctClaimIdentity.bind(null, claim.reference);
-  const patientMissing = claim.patientName === "Pending extraction";
-  const providerMissing = claim.providerName === "Pending extraction";
 
   return (
     <div className="review">
@@ -51,7 +53,7 @@ export default async function ReviewPage({
           status={claim.status}
         />
       </div>
-      {(patientMissing || providerMissing) && claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientMissing={patientMissing} providerMissing={providerMissing} /> : null}
+      {(patientMissing || providerMissing || amountMissing) && claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientMissing={patientMissing} providerMissing={providerMissing} amountMissing={amountMissing} /> : null}
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
           documents={documents}

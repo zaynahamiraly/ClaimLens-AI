@@ -155,4 +155,5 @@ a { color: inherit; text-decoration: none; }
 .missing-identity form { display:flex; align-items:flex-end; flex-wrap:wrap; gap:10px; margin-top:14px; }
 .missing-identity label { display:flex; flex-direction:column; gap:6px; font-size:10px; font-weight:800; }
 .missing-identity input { width:min(280px,75vw); border:1px solid #d8c18f; border-radius:7px; padding:10px; background:white; }
+.missing-identity select { min-width:120px; border:1px solid #d8c18f; border-radius:7px; padding:10px; background:white; }
 .missing-identity button svg { width:14px; }

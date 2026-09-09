@@ -38,7 +38,7 @@ function providerFromHeading(text: string) {
 
 function money(raw: string | null) {
   if (!raw) return null;
-  const match = raw.match(/(?:MUR|Rs\.?|USD|EUR|GBP)?\s*([0-9][0-9, ]*(?:\.\d{2})?)/i);
+  const match = raw.match(/(?:MUR|Rs\.?|UGX|KES|TZS|Shs\.?)?\s*([0-9][0-9, ]*(?:\.\d{1,2})?)/i);
   if (!match) return null;
   const normalized = match[1].replace(/[ ,]/g, "");
   const amount = Number(normalized);
@@ -49,7 +49,12 @@ function detectedCurrency(text: string) {
   const labelled = text.match(/\bcurrenc(?:y|ies)\b\s*(?::|-)?\s*([A-Z]{3})/i);
   if (labelled?.[1]) return labelled[1].toUpperCase();
   if (/\bRs\.?\s*\d/i.test(text)) return "MUR";
-  const nextToAmount = text.match(/(?:\b(MUR|USD|EUR|GBP)\s+[0-9][0-9, ]*\.\d{2}\b|\b[0-9][0-9, ]*\.\d{2}\s+(MUR|USD|EUR|GBP)\b)/i);
+  if (/\bShs\.?\s*\d/i.test(text)) {
+    if (/\b(Uganda|Kampala|Kayunga)\b|\+?256\b/i.test(text)) return "UGX";
+    if (/\b(Kenya|Nairobi)\b|\+?254\b/i.test(text)) return "KES";
+    if (/\b(Tanzania|Dar\s+es\s+Salaam)\b|\+?255\b/i.test(text)) return "TZS";
+  }
+  const nextToAmount = text.match(/(?:\b(MUR|USD|EUR|GBP|UGX|KES|TZS)\s+[0-9][0-9, ]*(?:\.\d{1,2})?\b|\b[0-9][0-9, ]*(?:\.\d{1,2})?\s+(MUR|USD|EUR|GBP|UGX|KES|TZS)\b)/i);
   return (nextToAmount?.[1] ?? nextToAmount?.[2])?.toUpperCase() ?? null;
 }
 
@@ -60,9 +65,9 @@ type MonetaryCandidate = {
   documentId: string;
 };
 
-const totalContext = /\b(total|payable|due|reimburs(?:e|ement)|claim(?:ed)?|net\s+amount|settlement)\b/i;
-const nonAmountContext = /\b(date|reference|member|policy|phone|fax)\b/i;
-const monetaryValue = /(?:(?:\b(?:MUR|USD|EUR|GBP)|Rs\.?)\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d{2})?|(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{2}(?:\s+(?:MUR|USD|EUR|GBP)\b)?)/gi;
+const totalContext = /\b(total|payable|due|reimburs(?:e|ement)|claim(?:ed)?|net\s+amount|settlement|sum\s+of\s+shillings)\b/i;
+const nonAmountContext = /\b(date|reference|member|policy|phone|fax|balance)\b/i;
+const monetaryValue = /(?:(?:\b(?:MUR|USD|EUR|GBP|UGX|KES|TZS)|Rs\.?|Shs\.?)\s*(?:\d{1,3}(?:[ ,]\d{3})+|\d+)(?:\.\d{1,2})?|(?:\d{1,3}(?:[ ,]\d{3})+|\d+)\.\d{1,2}(?:\s+(?:MUR|USD|EUR|GBP|UGX|KES|TZS)\b)?)/gi;
 
 function rankedMonetaryCandidates(texts: TextDocument[]): MonetaryCandidate[] {
   const candidates: MonetaryCandidate[] = [];
@@ -93,10 +98,10 @@ function rankedMonetaryCandidates(texts: TextDocument[]): MonetaryCandidate[] {
 
 export function extractClaimFields(texts: TextDocument[]) {
   const specs = [
-    { name: "patient_name", labels: ["Patient / Patient(e)", "Patient name", "Patient(e)", "Patient", "Mr/Mrs/Miss", "Name"], normalise: (value: string | null) => value, confidence: 0.96 },
+    { name: "patient_name", labels: ["Patient / Patient(e)", "Patient name", "Patient(e)", "Patient", "Received with thanks from", "Mr/Mrs/Miss", "Name"], normalise: (value: string | null) => value, confidence: 0.96 },
     { name: "member_number", labels: ["Member number", "Membership number", "Insurance Member ID"], normalise: (value: string | null) => value, confidence: 0.94 },
     { name: "provider_name", labels: ["Provider name", "Provider", "Facility"], normalise: (value: string | null) => value, confidence: 0.90 },
-    { name: "invoice_number", labels: ["No. facture / Invoice No.", "Invoice number", "Invoice no."], normalise: (value: string | null) => value, confidence: 0.95 },
+    { name: "invoice_number", labels: ["No. facture / Invoice No.", "Invoice number", "Invoice no.", "Receipt No.", "No."], normalise: (value: string | null) => value, confidence: 0.95 },
     { name: "service_date", labels: ["Service date", "Date of service", "Treatment Date", "Date"], normalise: (value: string | null) => value, confidence: 0.91 },
     { name: "invoice_total", labels: ["Invoice total", "Total amount", "Grand total", "Total"], normalise: money, confidence: 0.93 },
     { name: "claimed_amount", labels: ["Claimed amount", "Claim amount", "Amount claimed", "Invoice total", "Grand total", "Total"], normalise: money, confidence: 0.92 },
