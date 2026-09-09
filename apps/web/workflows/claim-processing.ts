@@ -3,7 +3,7 @@ import { APICallError, generateText } from "ai";
 import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
 import { extractClaimFields, type RuleExtractedField } from "@/lib/extraction-rules";
-import { signInternalOcrRequest } from "@/lib/internal-ocr-auth";
+import { transcribeLocally } from "@/lib/local-ocr";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type DocumentRow = {
@@ -29,7 +29,6 @@ type ExtractionOutcome =
 const MAX_PAGES_PER_DOCUMENT = 20;
 const EXTRACTION_TIMEOUT_MS = 25_000;
 const OCR_TIMEOUT_MS = 60_000;
-const LOCAL_OCR_TIMEOUT_MS = 240_000;
 const DEFAULT_OCR_MODEL = "gemini-3.8-flash";
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -66,42 +65,6 @@ async function transcribeWithGoogle(document: DocumentRow, bytes: Uint8Array) {
   }
 }
 
-function getInternalOcrUrl() {
-  const host = process.env.NEXT_PUBLIC_SITE_URL?.trim()
-    || process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
-    || process.env.VERCEL_URL?.trim();
-  if (!host) throw new Error("The application URL is unavailable for local OCR.");
-  const baseUrl = /^https?:\/\//i.test(host) ? host : `https://${host}`;
-  return `${baseUrl.replace(/\/$/, "")}/api/internal/ocr`;
-}
-
-async function transcribeLocally(document: DocumentRow) {
-  const body = JSON.stringify({ documentId: document.id });
-  const timestamp = Date.now().toString();
-  const response = await fetch(getInternalOcrUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-claimlens-timestamp": timestamp,
-      "x-claimlens-signature": signInternalOcrRequest(body, timestamp),
-    },
-    body,
-    signal: AbortSignal.timeout(LOCAL_OCR_TIMEOUT_MS),
-  });
-  const rawResult = await response.text();
-  let result: unknown = rawResult;
-  try {
-    result = JSON.parse(rawResult);
-  } catch {
-    // Keep the response text so an HTML or plain-text platform error is visible.
-  }
-  if (!response.ok) throw new Error(`OCR service returned HTTP ${response.status}: ${errorMessage(result)}`);
-  if (!result || typeof result !== "object" || typeof (result as { text?: unknown }).text !== "string") {
-    throw new Error("OCR service returned an invalid response.");
-  }
-  return (result as { text: string }).text.trim();
-}
-
 async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
   const provider = process.env.CLAIM_OCR_PROVIDER?.trim().toLowerCase() || "local";
   if (provider === "google") {
@@ -115,14 +78,13 @@ async function transcribeDocument(document: DocumentRow, bytes: Uint8Array) {
     }
   }
   try {
-    return await transcribeLocally(document);
+    return await transcribeLocally(document, bytes);
   } catch (error) {
     throw new Error(`Local OCR failed for ${document.original_name}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
 async function markStarted(jobId: string, claimId: string, actorId: string) {
-  "use step";
   console.log("[claim-processing] starting", { jobId, claimId });
   const admin = createAdminClient();
   const now = new Date().toISOString();
@@ -143,7 +105,6 @@ async function markStarted(jobId: string, claimId: string, actorId: string) {
 }
 
 async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
-  "use step";
   console.log("[claim-processing] extracting documents", { claimId });
   const admin = createAdminClient();
   const { data, error } = await admin
@@ -200,10 +161,7 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     } };
 }
 
-extractDocuments.maxRetries = 0;
-
 async function saveCompleted(jobId: string, claimId: string, actorId: string, result: ExtractionResult) {
-  "use step";
   console.log("[claim-processing] saving completed result", { jobId, claimId, fieldCount: result.fields.length });
   const admin = createAdminClient();
   const rows = result.fields.map((field) => ({
@@ -236,7 +194,6 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
 }
 
 async function saveFailed(jobId: string, claimId: string, actorId: string, reason: string) {
-  "use step";
   console.error("[claim-processing] recording failure", { jobId, claimId, reason });
   const admin = createAdminClient();
   const safeReason = reason.slice(0, 1000);
@@ -263,11 +220,10 @@ function errorMessage(error: unknown): string {
       // Fall through to the safe generic message.
     }
   }
-  return "Processing failed without a readable error message. Check the workflow runtime logs.";
+  return "Processing failed without a readable error message. Check the server runtime logs.";
 }
 
-export async function claimProcessingWorkflow(jobId: string, claimId: string, actorId: string) {
-  "use workflow";
+export async function processClaim(jobId: string, claimId: string, actorId: string) {
   await markStarted(jobId, claimId, actorId);
   try {
     const outcome = await extractDocuments(claimId);
