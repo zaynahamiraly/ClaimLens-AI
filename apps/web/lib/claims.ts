@@ -43,6 +43,7 @@ function toDTO(row: ClaimRow, names: Map<string, string>): ClaimDTO {
     amount: row.claimed_amount == null
       ? "Pending extraction"
       : `${row.currency} ${Number(row.claimed_amount).toLocaleString("en-MU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    currency: row.currency,
     status: row.status,
     warningCount: row.warning_count,
     createdAt: row.created_at,

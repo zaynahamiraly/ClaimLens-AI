@@ -25,13 +25,15 @@ function afterLabel(text: string, labels: string[]) {
 
 function providerFromHeading(text: string) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const signedProvider = lines.map((line) => /\bFor\s*:\s*(.+)$/i.exec(line)?.[1]?.trim()).find(Boolean);
+  if (signedProvider) return signedProvider;
   const documentTitle = lines.findIndex((line) => /\b(invoice|facture|receipt|claim\s+form|medical\s+certificate)\b/i.test(line));
   const heading = lines.slice(0, documentTitle > 0 ? documentTitle : Math.min(lines.length, 6));
   return heading.find((line) =>
     line.length >= 3
     && line.length <= 120
     && /[a-z]{3}/i.test(line)
-    && !/\b(address|street|road|tel|phone|fax|email|brn|date|patient|member|invoice)\b/i.test(line)
+    && !/\b(address|street|road|tel|phone|fax|email|brn|date|patient|member|invoice|payment|cash|cheque|balance|thanks|sign)\b/i.test(line)
     && !/^\d/.test(line)
   ) ?? null;
 }

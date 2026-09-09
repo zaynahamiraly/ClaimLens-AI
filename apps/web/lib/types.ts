@@ -34,6 +34,7 @@ export type ClaimDTO = {
   patientName: string;
   providerName: string;
   amount: string;
+  currency: string;
   status: ClaimStatus;
   warningCount: number;
   createdAt: string;

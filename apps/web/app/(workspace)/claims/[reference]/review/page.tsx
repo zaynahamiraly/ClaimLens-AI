@@ -32,6 +32,8 @@ export default async function ReviewPage({
   const patientMissing = claim.patientName === "Pending extraction";
   const providerMissing = claim.providerName === "Pending extraction";
   const amountMissing = claim.amount === "Pending extraction";
+  const amountPrediction = extractedFields.find((field) => field.fieldName === "claimed_amount")?.value
+    ?? (amountMissing ? "" : claim.amount.replace(/^[A-Z]{3}\s+/, "").replaceAll(",", ""));
   const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
     || patientMissing || providerMissing || amountMissing
     || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
@@ -53,7 +55,7 @@ export default async function ReviewPage({
           status={claim.status}
         />
       </div>
-      {(patientMissing || providerMissing || amountMissing) && claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientMissing={patientMissing} providerMissing={providerMissing} amountMissing={amountMissing} /> : null}
+      {claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientValue={patientMissing ? "" : claim.patientName} providerValue={providerMissing ? "" : claim.providerName} amountValue={amountPrediction} currency={claim.currency} /> : null}
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
           documents={documents}
