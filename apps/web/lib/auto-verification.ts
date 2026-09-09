@@ -11,7 +11,7 @@ export type AutoVerificationAssessment = {
 };
 
 const DEFAULT_THRESHOLD = 0.85;
-const REQUIRED_FIELDS = new Set(["patient_name", "claimed_amount"]);
+const REQUIRED_FIELDS = new Set(["patient_name", "provider_name", "claimed_amount"]);
 const SUPPORTING_FIELDS = new Set(["invoice_number", "service_date"]);
 
 export function autoVerificationThreshold() {

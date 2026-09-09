@@ -38,8 +38,8 @@ function toDTO(row: ClaimRow, names: Map<string, string>): ClaimDTO {
   return {
     id: row.id,
     reference: row.reference,
-    patientName: row.patient_name,
-    providerName: row.provider_name,
+    patientName: row.patient_name.trim() || "Pending extraction",
+    providerName: row.provider_name.trim() || "Pending extraction",
     amount: row.claimed_amount == null
       ? "Pending extraction"
       : `${row.currency} ${Number(row.claimed_amount).toLocaleString("en-MU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,

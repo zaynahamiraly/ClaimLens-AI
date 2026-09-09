@@ -23,6 +23,10 @@ function eventDetail(row: AuditRow) {
   if (row.event_type === "CLAIM_VERIFIED" && autoVerified === true && typeof automationConfidence === "number") {
     return `Automatically verified · ${Math.round(automationConfidence * 100)}% confidence · no validation warnings`;
   }
+  const fieldName = row.metadata?.field_name;
+  if (row.event_type === "FIELD_CORRECTED" && typeof fieldName === "string") {
+    return `${fieldName.replaceAll("_", " ")} supplied by a human reviewer`;
+  }
   const notes = row.metadata?.notes;
   const amount = row.metadata?.approved_amount;
   if (row.event_type === "CLAIM_APPROVED" && typeof notes === "string") {

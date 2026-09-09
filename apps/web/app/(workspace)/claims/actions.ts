@@ -15,11 +15,6 @@ const MAX_FILES = 3;
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg", DOCX_TYPE]);
 
-const claimSchema = z.object({
-  patientName: z.string().trim().min(2, "Enter the patient name.").max(120),
-  providerName: z.string().trim().min(2, "Enter the provider name.").max(160),
-});
-
 const decisionSchema = z.object({
   outcome: z.enum(["APPROVED", "REJECTED"]),
   notes: z.string().trim().min(5, "Enter at least 5 characters of decision notes.").max(2000),
@@ -36,7 +31,13 @@ const settlementSchema = z.object({
   status: z.enum(["PAYMENT_PENDING", "PAID"]),
 });
 
-export type ClaimFormState = { error?: string; fieldErrors?: { patientName?: string[]; providerName?: string[] } };
+const identityCorrectionSchema = z.object({
+  patientName: z.string().trim().min(2).max(120).optional(),
+  providerName: z.string().trim().min(2).max(160).optional(),
+}).refine((value) => value.patientName || value.providerName, "Enter the missing information.");
+
+export type ClaimFormState = { error?: string };
+export type IdentityCorrectionState = { success?: boolean; error?: string };
 
 function revalidateClaimWorkflow(reference: string) {
   revalidatePath("/dashboard");
@@ -62,9 +63,6 @@ function safeFilename(filename: string) {
 
 export async function createClaim(_state: ClaimFormState, formData: FormData): Promise<ClaimFormState> {
   const viewer = await requireViewer();
-  const parsed = claimSchema.safeParse({ patientName: formData.get("patientName"), providerName: formData.get("providerName") });
-  if (!parsed.success) return { fieldErrors: parsed.error.flatten().fieldErrors };
-
   const files = formData.getAll("documents").filter((value): value is File => value instanceof File && value.size > 0);
   if (files.length < 1 || files.length > MAX_FILES) return { error: `Upload between 1 and ${MAX_FILES} documents.` };
   for (const file of files) {
@@ -78,8 +76,8 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
   const supabase = await createClient();
   const reference = `CLM-${new Date().getUTCFullYear()}-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
   const { data: claim, error: claimError } = await supabase.from("claims").insert({
-    reference, created_by: viewer.id, patient_name: parsed.data.patientName,
-    provider_name: parsed.data.providerName, status: "PROCESSING",
+    reference, created_by: viewer.id, patient_name: "",
+    provider_name: "", status: "PROCESSING",
     client_id: viewer.role === "client" ? viewer.id : null,
   }).select("id").single();
   if (claimError || !claim) return { error: "Could not create the claim. Please try again." };
@@ -159,6 +157,53 @@ export async function verifyClaim(
     console.error("[verifyClaim] verification failed", { reference, error: error.message });
     return { error: "Claim verification failed. Please try again." };
   }
+  revalidateClaimWorkflow(reference);
+  return { success: true };
+}
+
+export async function correctClaimIdentity(
+  reference: string,
+  _previousState: IdentityCorrectionState,
+  formData: FormData,
+): Promise<IdentityCorrectionState> {
+  void _previousState;
+  const viewer = await requireRole(["claims_officer", "supervisor", "administrator"]);
+  const parsed = identityCorrectionSchema.safeParse({
+    patientName: formData.get("patientName")?.toString() || undefined,
+    providerName: formData.get("providerName")?.toString() || undefined,
+  });
+  if (!parsed.success) return { error: "Enter at least two characters for each missing field." };
+  if (isDemoMode) return { success: true };
+
+  const supabase = await createClient();
+  const { data: claim, error: claimError } = await supabase
+    .from("claims")
+    .select("id,status,patient_name,provider_name")
+    .eq("reference", reference)
+    .maybeSingle();
+  if (claimError || !claim || claim.status !== "REVIEW_REQUIRED") {
+    return { error: "Missing information can only be supplied during human review." };
+  }
+
+  const updates: { patient_name?: string; provider_name?: string } = {};
+  if (parsed.data.patientName) updates.patient_name = parsed.data.patientName;
+  if (parsed.data.providerName) updates.provider_name = parsed.data.providerName;
+  const { error: updateError } = await supabase.from("claims").update(updates).eq("id", claim.id);
+  if (updateError) return { error: "The missing information could not be saved." };
+
+  const events = Object.entries(updates).map(([fieldName, value]) => ({
+    claim_id: claim.id,
+    actor_id: viewer.id,
+    event_type: "FIELD_CORRECTED",
+    metadata: {
+      field_name: fieldName,
+      previous_value: fieldName === "patient_name" ? claim.patient_name : claim.provider_name,
+      corrected_value: value,
+      source: "human_entry",
+    },
+  }));
+  const { error: auditError } = await supabase.from("audit_events").insert(events);
+  if (auditError) console.error("[correctClaimIdentity] audit insert failed", { reference, error: auditError.message });
   revalidateClaimWorkflow(reference);
   return { success: true };
 }

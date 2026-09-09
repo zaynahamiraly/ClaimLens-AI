@@ -16,11 +16,24 @@ function escaped(value: string) {
 
 function afterLabel(text: string, labels: string[]) {
   for (const label of labels) {
-    const pattern = new RegExp(`(?:^|\\n)\\s*${escaped(label)}\\s*(?::|-)?\\s*(?:\\n\\s*)?([^\\n]+)`, "im");
+    const pattern = new RegExp(`(?:^|\\n)\\s*${escaped(label)}\\s*(?::|-|\\.{2,})?\\s*(?:\\n\\s*)?([^\\n]+)`, "im");
     const value = pattern.exec(text)?.[1]?.trim();
     if (value) return value;
   }
   return null;
+}
+
+function providerFromHeading(text: string) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const documentTitle = lines.findIndex((line) => /\b(invoice|facture|receipt|claim\s+form|medical\s+certificate)\b/i.test(line));
+  const heading = lines.slice(0, documentTitle > 0 ? documentTitle : Math.min(lines.length, 6));
+  return heading.find((line) =>
+    line.length >= 3
+    && line.length <= 120
+    && /[a-z]{3}/i.test(line)
+    && !/\b(address|street|road|tel|phone|fax|email|brn|date|patient|member|invoice)\b/i.test(line)
+    && !/^\d/.test(line)
+  ) ?? null;
 }
 
 function money(raw: string | null) {
@@ -80,26 +93,50 @@ function rankedMonetaryCandidates(texts: TextDocument[]): MonetaryCandidate[] {
 
 export function extractClaimFields(texts: TextDocument[]) {
   const specs = [
-    { name: "patient_name", labels: ["Patient name", "Patient"], normalise: (value: string | null) => value, confidence: 0.96 },
+    { name: "patient_name", labels: ["Patient / Patient(e)", "Patient name", "Patient(e)", "Patient", "Mr/Mrs/Miss", "Name"], normalise: (value: string | null) => value, confidence: 0.96 },
     { name: "member_number", labels: ["Member number", "Membership number", "Insurance Member ID"], normalise: (value: string | null) => value, confidence: 0.94 },
     { name: "provider_name", labels: ["Provider name", "Provider", "Facility"], normalise: (value: string | null) => value, confidence: 0.90 },
-    { name: "invoice_number", labels: ["Invoice number", "Invoice no"], normalise: (value: string | null) => value, confidence: 0.95 },
-    { name: "service_date", labels: ["Service date", "Date of service", "Treatment Date"], normalise: (value: string | null) => value, confidence: 0.91 },
+    { name: "invoice_number", labels: ["No. facture / Invoice No.", "Invoice number", "Invoice no."], normalise: (value: string | null) => value, confidence: 0.95 },
+    { name: "service_date", labels: ["Service date", "Date of service", "Treatment Date", "Date"], normalise: (value: string | null) => value, confidence: 0.91 },
     { name: "invoice_total", labels: ["Invoice total", "Total amount", "Grand total", "Total"], normalise: money, confidence: 0.93 },
     { name: "claimed_amount", labels: ["Claimed amount", "Claim amount", "Amount claimed", "Invoice total", "Grand total", "Total"], normalise: money, confidence: 0.92 },
   ];
   const fields: RuleExtractedField[] = [];
+  let conflictCount = 0;
   for (const spec of specs) {
-    for (const entry of texts) {
+    const candidates = texts.flatMap((entry) => {
       const rawValue = afterLabel(entry.text, spec.labels);
       const normalizedValue = spec.normalise(rawValue);
-      if (rawValue && normalizedValue) {
-        const confidence = entry.sourceConfidence == null
-          ? spec.confidence
-          : Math.min(spec.confidence, entry.sourceConfidence);
-        fields.push({ fieldName: spec.name, rawValue, normalizedValue, confidence, method: `${entry.method ?? "pdf_text"}_label_rule`, documentId: entry.documentId, pageNumber: 1 });
-        break;
-      }
+      return rawValue && normalizedValue ? [{ entry, rawValue, normalizedValue }] : [];
+    });
+    const selected = candidates[0];
+    if (selected) {
+      const confidence = selected.entry.sourceConfidence == null
+        ? spec.confidence
+        : Math.min(spec.confidence, selected.entry.sourceConfidence);
+      fields.push({ fieldName: spec.name, rawValue: selected.rawValue, normalizedValue: selected.normalizedValue, confidence, method: `${selected.entry.method ?? "pdf_text"}_label_rule`, documentId: selected.entry.documentId, pageNumber: 1 });
+      const distinctValues = new Set(candidates.map((candidate) => candidate.normalizedValue.trim().toLocaleLowerCase()));
+      if (distinctValues.size > 1) conflictCount += 1;
+    }
+  }
+  if (!fields.some((field) => field.fieldName === "provider_name")) {
+    const candidates = texts.flatMap((entry) => {
+      const rawValue = providerFromHeading(entry.text);
+      return rawValue ? [{ entry, rawValue }] : [];
+    });
+    const selected = candidates[0];
+    if (selected) {
+      fields.push({
+        fieldName: "provider_name",
+        rawValue: selected.rawValue,
+        normalizedValue: selected.rawValue,
+        confidence: Math.min(0.88, selected.entry.sourceConfidence ?? 1),
+        method: `${selected.entry.method ?? "pdf_text"}_heading_rule`,
+        documentId: selected.entry.documentId,
+        pageNumber: 1,
+      });
+      const distinctValues = new Set(candidates.map((candidate) => candidate.rawValue.trim().toLocaleLowerCase()));
+      if (distinctValues.size > 1) conflictCount += 1;
     }
   }
   if (!fields.some((field) => field.fieldName === "claimed_amount")) {
@@ -126,6 +163,6 @@ export function extractClaimFields(texts: TextDocument[]) {
     fields,
     claimedAmount,
     currency: detectedCurrency(texts.map((entry) => entry.text).join("\n")),
-    warningCount: claimedAmount && invoiceTotal && claimedAmount !== invoiceTotal ? 1 : 0,
+    warningCount: conflictCount + (claimedAmount && invoiceTotal && claimedAmount !== invoiceTotal ? 1 : 0),
   };
 }

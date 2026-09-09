@@ -195,12 +195,16 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
   const now = new Date().toISOString();
   const automation = assessAutoVerification(result.fields, result.warningCount, autoVerificationThreshold());
   const claimStatus: "REVIEW_REQUIRED" | "VERIFIED" = automation.eligible ? "VERIFIED" : "REVIEW_REQUIRED";
-  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string } = {
+  const patientName = result.fields.find((field) => field.fieldName === "patient_name")?.normalizedValue;
+  const providerName = result.fields.find((field) => field.fieldName === "provider_name")?.normalizedValue;
+  const claimUpdate: { claimed_amount: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string; patient_name?: string; provider_name?: string } = {
     claimed_amount: result.claimedAmount,
     warning_count: result.warningCount,
     status: claimStatus,
   };
   if (result.currency) claimUpdate.currency = result.currency;
+  if (patientName) claimUpdate.patient_name = patientName;
+  if (providerName) claimUpdate.provider_name = providerName;
   const auditEvents = [{
     claim_id: claimId,
     actor_id: actorId,

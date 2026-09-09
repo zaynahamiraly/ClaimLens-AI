@@ -28,17 +28,11 @@ export function ClaimForm() {
   };
   const removeFile = (removedIndex: number) => syncInput(files.filter((_, index) => index !== removedIndex));
   return <form action={action} className="claim-form-card">
-    <div className="form-grid">
-      <label htmlFor="patientName">Patient name<input id="patientName" name="patientName" placeholder="Synthetic patient name" minLength={2} maxLength={120} required /></label>
-      <label htmlFor="providerName">Provider<input id="providerName" name="providerName" placeholder="Medical provider" minLength={2} maxLength={160} required /></label>
-    </div>
-    {state.fieldErrors?.patientName ? <p className="auth-error">{state.fieldErrors.patientName[0]}</p> : null}
-    {state.fieldErrors?.providerName ? <p className="auth-error">{state.fieldErrors.providerName[0]}</p> : null}
     <label className="drop"><Upload /><b>{files.length ? "Add more claim documents" : "Select claim documents"}</b><span>1–3 PDF, PNG, JPEG, or DOCX files · maximum 6 MB each</span><input ref={inputRef} name="documents" multiple type="file" accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" required onChange={(event) => addFiles(event.currentTarget.files)} /></label>
     {files.length ? <div className="selected-documents" aria-live="polite"><b>{files.length} document{files.length === 1 ? "" : "s"} ready to submit</b>{files.map((file, index) => <span key={`${file.name}-${file.lastModified}-${index}`}><FileText />{file.name}<small>{(file.size / 1024 / 1024).toFixed(2)} MB</small><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><X /></button></span>)}</div> : null}
     {fileNotice ? <p className="workflow-error" role="alert">{fileNotice}</p> : null}
     {state.error ? <p className="auth-error" role="alert">{state.error}</p> : null}
-    <div className="upload-guidance"><FileText /><p><b>Use synthetic data only.</b><br />Files are stored in a private, owner-scoped Supabase bucket.</p></div>
+    <div className="upload-guidance"><FileText /><p><b>Patient, provider, amount, and dates are extracted automatically.</b><br />Use synthetic data only. Files are stored in a private, owner-scoped Supabase bucket.</p></div>
     <div className="modal-actions"><button className="primary" type="submit" disabled={pending}>{pending ? "Creating claim…" : "Create & process"}<ArrowRight /></button></div>
   </form>;
 }

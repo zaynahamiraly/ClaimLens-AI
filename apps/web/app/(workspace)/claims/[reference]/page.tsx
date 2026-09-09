@@ -3,7 +3,7 @@ import { AlertCircle, ArrowRight, CalendarDays, CircleDollarSign, FileCheck2, Fi
 import { notFound } from "next/navigation";
 import { getClaimAudit } from "@/lib/audit";
 import { requireViewer } from "@/lib/auth";
-import { getClaim, getClaimDecision, getClaimDocuments, getClaimProcessing } from "@/lib/claims";
+import { getClaim, getClaimDecision, getClaimDocuments, getClaimExtractedFields, getClaimProcessing } from "@/lib/claims";
 import { canAssign, canReview } from "@/lib/permissions";
 import { listClaimsOfficers } from "@/lib/users";
 import { StatusPill } from "@/components/status-pill";
@@ -21,12 +21,13 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
   if (!claim) notFound();
 
   const staff = canReview(viewer.role);
-  const [documents, events, officers, processing, decision] = await Promise.all([
+  const [documents, events, officers, processing, decision, extractedFields] = await Promise.all([
     getClaimDocuments(claim.id),
     getClaimAudit(claim.id),
     staff ? listClaimsOfficers() : Promise.resolve([]),
     getClaimProcessing(claim.id),
     getClaimDecision(claim.id),
+    getClaimExtractedFields(claim.id),
   ]);
   const mayReview = staff && (viewer.role !== "claims_officer" || claim.assignedTo === viewer.id);
   const assignAction = assignClaim.bind(null, claim.reference);
@@ -36,6 +37,22 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
   const processingActive = processing?.status === "QUEUED" || processing?.status === "RUNNING";
   const processingUnavailable = processing?.status === "UNAVAILABLE";
   const canStartProcessing = ["UPLOADED", "PROCESSING", "PROCESSING_FAILED"].includes(claim.status) && !processingActive && !processingUnavailable;
+  const extractedByName = new Map(extractedFields.map((field) => [field.fieldName, field]));
+  const confidenceRows = [
+    ["patient_name", "Patient"],
+    ["provider_name", "Provider"],
+    ["claimed_amount", "Claimed amount"],
+    ["invoice_number", "Invoice number"],
+    ["service_date", "Service date"],
+  ].map(([name, label]) => {
+    const field = extractedByName.get(name);
+    const humanValue = name === "patient_name" && claim.patientName !== "Pending extraction"
+      ? claim.patientName
+      : name === "provider_name" && claim.providerName !== "Pending extraction"
+        ? claim.providerName
+        : null;
+    return { name, label, field, humanValue };
+  });
 
   return <div className="content">
     <ProcessingAutoRefresh active={processingActive} />
@@ -45,6 +62,7 @@ export default async function ClaimDetailPage({ params }: { params: Promise<{ re
       <article className="detail-card"><UserRoundCheck /><div><span>Ownership</span><strong>{claim.clientName ?? "Staff-created claim"}</strong><small>Assigned to: {claim.assignedOfficerName ?? "Unassigned"}</small></div></article>
       <article className="detail-card"><CalendarDays /><div><span>Submitted</span><strong>{formatMauritiusDateTime(claim.createdAt)}</strong><small>{claim.warningCount} validation warnings</small></div></article>
     </section>
+    <section className="confidence-panel"><div className="confidence-heading"><div><p className="kicker">Document intelligence</p><h2>Extracted information and confidence</h2></div><small>Values come from OCR or are clearly marked as human-provided.</small></div><div className="confidence-grid">{confidenceRows.map(({ name, label, field, humanValue }) => <article key={name} className={field || humanValue ? "" : "missing"}><span>{label}</span><strong>{field?.value ?? humanValue ?? (processingActive ? "Processing…" : "Information required")}</strong><small>{field ? `${Math.round(field.confidence * 100)}% confidence · ${field.documentName ?? "Claim document"}` : humanValue ? "Human provided · OCR confidence unavailable" : processingActive ? "OCR is checking the documents" : "Not confidently detected"}</small></article>)}</div></section>
     {documents.length ? <section className="claim-documents"><h2>Uploaded documents ({documents.length})</h2><div className="claim-document-list">{documents.map((document) => <a key={document.id} href={document.signedUrl} target="_blank" rel="noreferrer"><FileText />{document.name}</a>)}</div></section> : null}
     {decision ? <section className="decision-summary"><CircleDollarSign /><div><span>Claim decision</span><strong>{decision.outcome.replaceAll("_", " ")}</strong><p>{decision.notes}</p><small>{decision.approvedAmount ? `Approved amount: ${decision.approvedAmount} · ` : ""}{formatMauritiusDateTime(decision.decidedAt)}</small></div></section> : null}
     {(viewer.role === "supervisor" || viewer.role === "administrator") && claim.status === "VERIFIED" ? <ClaimDecisionForm action={decisionAction} /> : null}

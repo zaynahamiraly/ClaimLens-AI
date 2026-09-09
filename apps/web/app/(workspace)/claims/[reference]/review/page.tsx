@@ -3,9 +3,10 @@ import { FileText } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
 import { VerificationControls } from "@/components/verification-controls";
+import { MissingIdentityForm } from "@/components/missing-identity-form";
 import { getClaim, getClaimDocuments, getClaimExtractedFields } from "@/lib/claims";
 import { requireRole } from "@/lib/auth";
-import { verifyClaim } from "../../actions";
+import { correctClaimIdentity, verifyClaim } from "../../actions";
 
 export default async function ReviewPage({
   params,
@@ -31,6 +32,9 @@ export default async function ReviewPage({
   const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
     || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
   const verificationAction = verifyClaim.bind(null, claim.reference);
+  const correctionAction = correctClaimIdentity.bind(null, claim.reference);
+  const patientMissing = claim.patientName === "Pending extraction";
+  const providerMissing = claim.providerName === "Pending extraction";
 
   return (
     <div className="review">
@@ -47,6 +51,7 @@ export default async function ReviewPage({
           status={claim.status}
         />
       </div>
+      {(patientMissing || providerMissing) && claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientMissing={patientMissing} providerMissing={providerMissing} /> : null}
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
           documents={documents}
