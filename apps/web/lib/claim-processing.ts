@@ -4,8 +4,23 @@ import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processClaim } from "@/workflows/claim-processing";
 
+const STALE_JOB_AFTER_MS = 6 * 60 * 1_000;
+
 export async function enqueueClaimProcessing(claimId: string, actorId: string) {
   const admin = createAdminClient();
+  const staleBefore = new Date(Date.now() - STALE_JOB_AFTER_MS).toISOString();
+  const { error: staleError } = await admin
+    .from("claim_processing_jobs")
+    .update({
+      status: "FAILED",
+      last_error: "The previous background process stopped unexpectedly. Retry processing.",
+      finished_at: new Date().toISOString(),
+    })
+    .eq("claim_id", claimId)
+    .in("status", ["QUEUED", "RUNNING"])
+    .lt("created_at", staleBefore);
+  if (staleError) throw new Error(`Could not recover abandoned processing jobs: ${staleError.message}`);
+
   const { data: existing, error: existingError } = await admin
     .from("claim_processing_jobs")
     .select("id,workflow_run_id,status")

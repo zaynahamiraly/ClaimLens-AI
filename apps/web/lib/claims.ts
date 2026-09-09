@@ -22,6 +22,8 @@ export type ClaimProcessingDTO = {
   finishedAt: string | null;
 };
 
+const STALE_JOB_AFTER_MS = 6 * 60 * 1_000;
+
 export type ExtractedFieldDTO = {
   fieldName: string;
   rawValue: string;
@@ -141,11 +143,14 @@ export const getClaimProcessing = cache(async (claimId: string): Promise<ClaimPr
   }
   if (error) throw new Error("Unable to load claim processing status.");
   if (!data) return null;
+  const persistedStatus = data.status as ClaimProcessingDTO["status"];
+  const stale = (persistedStatus === "QUEUED" || persistedStatus === "RUNNING")
+    && Date.now() - new Date(data.created_at as string).getTime() > STALE_JOB_AFTER_MS;
   return {
     id: data.id as string,
-    status: data.status as ClaimProcessingDTO["status"],
+    status: stale ? "FAILED" : persistedStatus,
     workflowRunId: data.workflow_run_id as string | null,
-    lastError: data.last_error as string | null,
+    lastError: stale ? "The previous background process stopped unexpectedly. Retry processing." : data.last_error as string | null,
     createdAt: data.created_at as string,
     finishedAt: data.finished_at as string | null,
   };
