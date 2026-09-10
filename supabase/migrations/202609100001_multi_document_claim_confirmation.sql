@@ -72,6 +72,7 @@ alter table public.audit_events drop constraint if exists audit_events_event_typ
 alter table public.audit_events add constraint audit_events_event_type_check check (event_type in (
   'CLAIM_CREATED','CLAIM_SUBMITTED','CLAIM_ASSIGNED','DOCUMENT_UPLOADED','PROCESSING_STARTED','PROCESSING_COMPLETED',
   'PROCESSING_FAILED','FIELD_CORRECTED','REVIEW_STARTED','CLAIM_VERIFIED',
+  'CLAIM_APPROVED','CLAIM_REJECTED','CLAIM_PAYMENT_PENDING','CLAIM_PAID',
   'USER_CREATED','USER_ROLE_CHANGED','USER_STATUS_CHANGED','USER_PASSWORD_RESET','USER_DELETED'
 ));
 
