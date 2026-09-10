@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { extractText, getDocumentProxy } from "unpdf";
-import { extractClaimFields } from "../lib/extraction-rules.ts";
+import { classifyClaimDocument, extractClaimFields } from "../lib/extraction-rules.ts";
 import { assessAutoVerification } from "../lib/auto-verification.ts";
 
 const suppliedFile = process.argv[2];
@@ -38,4 +38,7 @@ assert.equal(shillingsReceipt.claimedAmount, "365000.00");
 assert.equal(shillingsReceipt.currency, "UGX");
 assert.equal(shillingsReceipt.fields.find((field) => field.fieldName === "provider_name")?.normalizedValue, "HOLISTIC MEDICAL CENTRE");
 assert.equal(shillingsReceipt.fields.find((field) => field.fieldName === "patient_name")?.normalizedValue, "Sample Patient");
+assert.equal(classifyClaimDocument(shillingsReceipt.fields.map((field) => field.rawValue).join("\n") + "\nRECEIPT").type, "RECEIPT");
+assert.deepEqual(classifyClaimDocument("MEDICAL CERTIFICATE\nPatient was unfit for work"), { type: "MEDICAL_CERTIFICATE", confidence: 0.94, payable: false });
+assert.equal(classifyClaimDocument("PHARMACY RECEIPT\nTotal Rs 750").type, "PHARMACY_RECEIPT");
 console.log(`Extraction verified: ${result.fields.length} fields, ${result.currency} ${result.claimedAmount}, ${Math.round(automation.confidence * 100)}% automation confidence`);

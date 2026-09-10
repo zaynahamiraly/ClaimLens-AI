@@ -1,9 +1,9 @@
+import { createHash } from "node:crypto";
 import { extractText, getDocumentProxy } from "unpdf";
 import { APICallError, generateText } from "ai";
 import { createGoogle } from "@ai-sdk/google";
 import mammoth from "mammoth";
-import { assessAutoVerification, autoVerificationThreshold } from "@/lib/auto-verification";
-import { extractClaimFields, type RuleExtractedField } from "@/lib/extraction-rules";
+import { classifyClaimDocument, extractClaimFields, type ClaimDocumentType, type RuleExtractedField } from "@/lib/extraction-rules";
 import { transcribeLocally } from "@/lib/local-ocr";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -16,11 +16,24 @@ type DocumentRow = {
 
 type ExtractionResult = {
   fields: RuleExtractedField[];
+  documents: DocumentExtraction[];
   claimedAmount: string | null;
   currency: string | null;
   warningCount: number;
   documentCount: number;
   pageCount: number;
+};
+
+type DocumentExtraction = {
+  id: string;
+  type: ClaimDocumentType;
+  amount: string | null;
+  currency: string | null;
+  amountConfidence: number | null;
+  includeInTotal: boolean;
+  duplicateOf: string | null;
+  status: "COMPLETED" | "NEEDS_CONFIRMATION";
+  notes: string | null;
 };
 
 type ExtractionOutcome =
@@ -120,7 +133,8 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
   const documents = (data ?? []) as DocumentRow[];
   if (!documents.length) return { ok: false, reason: "No claim documents were found." };
 
-  const texts: Array<{ document: DocumentRow; text: string; method: "pdf_text" | "docx_text" | "ocr"; sourceConfidence: number | null }> = [];
+  const texts: Array<{ document: DocumentRow; text: string; method: "pdf_text" | "docx_text" | "ocr"; sourceConfidence: number | null; fingerprint: string }> = [];
+  const unreadableDocuments: Array<{ document: DocumentRow; reason: string }> = [];
   let pageCount = 0;
   for (const document of documents) {
     const { data: blob, error: downloadError } = await admin.storage.from("claim-documents").download(document.storage_path);
@@ -148,27 +162,80 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
       pageCount += 1;
     }
     if (!text) {
-      const transcription = await transcribeDocument(document, bytes);
-      text = transcription.text;
-      sourceConfidence = transcription.confidence;
+      try {
+        const transcription = await transcribeDocument(document, bytes);
+        text = transcription.text;
+        sourceConfidence = transcription.confidence;
+      } catch (error) {
+        unreadableDocuments.push({ document, reason: error instanceof Error ? error.message : "OCR could not read this document." });
+      }
     }
-    if (text) texts.push({ document, text, method, sourceConfidence });
+    if (text) texts.push({ document, text, method, sourceConfidence, fingerprint: createHash("sha256").update(bytes).digest("hex") });
+    else if (!unreadableDocuments.some((entry) => entry.document.id === document.id)) unreadableDocuments.push({ document, reason: "No readable text was found. Enter the document details manually." });
   }
-  if (!texts.length) return { ok: false, reason: "No readable text could be extracted from the uploaded documents." };
 
-  const parsed = extractClaimFields(texts.map((entry) => ({
-    documentId: entry.document.id,
-    text: entry.text,
-    method: entry.method,
-    sourceConfidence: entry.sourceConfidence ?? undefined,
-  })));
-  const claimedAmount = parsed.claimedAmount;
-  console.log("[claim-processing] extraction completed", { claimId, fieldCount: parsed.fields.length, documentCount: documents.length, pageCount });
+  const perDocument = texts.map((entry) => {
+    const parsed = extractClaimFields([{ documentId: entry.document.id, text: entry.text, method: entry.method, sourceConfidence: entry.sourceConfidence ?? undefined }]);
+    const classification = classifyClaimDocument(entry.text);
+    const amountField = parsed.fields.find((field) => field.fieldName === "claimed_amount")
+      ?? parsed.fields.find((field) => field.fieldName === "invoice_total");
+    return { entry, parsed, classification, amountField };
+  });
+  const fields = perDocument.flatMap((item) => item.parsed.fields);
+  const documentsResult: DocumentExtraction[] = [];
+  const seenFingerprints = new Map<string, string>();
+  const seenReferences = new Map<string, string>();
+  for (const item of perDocument) {
+    const invoiceNumber = item.parsed.fields.find((field) => field.fieldName === "invoice_number")?.normalizedValue.trim().toLowerCase();
+    const duplicateKey = invoiceNumber && item.amountField
+      ? `${invoiceNumber}|${item.amountField.normalizedValue}|${item.parsed.currency ?? ""}`
+      : null;
+    const duplicateOf = seenFingerprints.get(item.entry.fingerprint) ?? (duplicateKey ? seenReferences.get(duplicateKey) : undefined) ?? null;
+    seenFingerprints.set(item.entry.fingerprint, item.entry.document.id);
+    if (duplicateKey) seenReferences.set(duplicateKey, item.entry.document.id);
+    const amountConfidence = item.amountField?.confidence ?? null;
+    const includeInTotal = Boolean(item.classification.payable && item.amountField && !duplicateOf);
+    const needsConfirmation = !item.amountField || amountConfidence === null || amountConfidence <= 0.85 || item.classification.confidence <= 0.85 || Boolean(duplicateOf);
+    documentsResult.push({
+      id: item.entry.document.id,
+      type: item.classification.type,
+      amount: item.amountField?.normalizedValue ?? null,
+      currency: item.parsed.currency,
+      amountConfidence,
+      includeInTotal,
+      duplicateOf,
+      status: needsConfirmation ? "NEEDS_CONFIRMATION" : "COMPLETED",
+      notes: duplicateOf ? "Possible duplicate document; excluded from the proposed total." : !item.amountField ? "No payable amount was confidently detected." : null,
+    });
+  }
+  for (const item of unreadableDocuments) {
+    documentsResult.push({
+      id: item.document.id,
+      type: "UNKNOWN",
+      amount: null,
+      currency: null,
+      amountConfidence: null,
+      includeInTotal: false,
+      duplicateOf: null,
+      status: "NEEDS_CONFIRMATION",
+      notes: item.reason.slice(0, 500),
+    });
+  }
+  const payableDocuments = documentsResult.filter((document) => document.includeInTotal && document.amount);
+  const currencies = new Set(payableDocuments.map((document) => document.currency).filter(Boolean));
+  const claimedAmount = currencies.size <= 1 && payableDocuments.length
+    ? payableDocuments.reduce((total, document) => total + Number(document.amount), 0).toFixed(2)
+    : null;
+  const currency = currencies.size === 1 ? [...currencies][0] ?? null : null;
+  const conflicts = perDocument.reduce((total, item) => total + item.parsed.warningCount, 0);
+  const warningCount = conflicts + documentsResult.filter((document) => document.status === "NEEDS_CONFIRMATION").length + (currencies.size > 1 ? 1 : 0);
+  console.log("[claim-processing] extraction completed", { claimId, fieldCount: fields.length, documentCount: documents.length, pageCount });
   return { ok: true, result: {
-      fields: parsed.fields,
+      fields,
+      documents: documentsResult,
       claimedAmount,
-      currency: parsed.currency,
-      warningCount: parsed.warningCount + (claimedAmount ? 0 : 1),
+      currency,
+      warningCount,
       documentCount: documents.length,
       pageCount,
     } };
@@ -187,18 +254,35 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
     extraction_method: field.method,
     page_number: field.pageNumber,
   }));
+  const { error: clearError } = await admin.from("claim_extracted_fields").delete().eq("claim_id", claimId);
+  if (clearError) throw new Error(`Could not replace extracted fields: ${clearError.message}`);
   if (rows.length) {
-    const { error } = await admin.from("claim_extracted_fields").upsert(rows, { onConflict: "claim_id,field_name" });
+    const { error } = await admin.from("claim_extracted_fields").insert(rows);
     if (error) throw new Error(`Could not save extracted fields: ${error.message}`);
   }
+  for (const document of result.documents) {
+    const { error } = await admin.from("claim_documents").update({
+      document_type: document.type,
+      extracted_amount: document.amount,
+      extracted_currency: document.currency,
+      amount_confidence: document.amountConfidence,
+      include_in_total: document.includeInTotal,
+      duplicate_of: document.duplicateOf,
+      extraction_status: document.status,
+      extraction_notes: document.notes,
+      extracted_at: new Date().toISOString(),
+    }).eq("id", document.id).eq("claim_id", claimId);
+    if (error) throw new Error(`Could not save document result: ${error.message}`);
+  }
   const now = new Date().toISOString();
-  const automation = assessAutoVerification(result.fields, result.warningCount, autoVerificationThreshold());
-  const claimStatus: "REVIEW_REQUIRED" | "VERIFIED" = automation.eligible ? "VERIFIED" : "REVIEW_REQUIRED";
-  const patientName = result.fields.find((field) => field.fieldName === "patient_name")?.normalizedValue;
-  const providerName = result.fields.find((field) => field.fieldName === "provider_name")?.normalizedValue;
-  const claimUpdate: { claimed_amount?: string; warning_count: number; status: "REVIEW_REQUIRED" | "VERIFIED"; currency?: string; patient_name?: string; provider_name?: string } = {
+  const automationConfidence = result.fields.length ? result.fields.reduce((sum, field) => sum + field.confidence, 0) / result.fields.length : 0;
+  const bestField = (name: string) => result.fields.filter((field) => field.fieldName === name).sort((left, right) => right.confidence - left.confidence)[0];
+  const patientName = bestField("patient_name")?.normalizedValue;
+  const providerName = bestField("provider_name")?.normalizedValue;
+  const claimUpdate: { claimed_amount?: string | null; warning_count: number; status: "UPLOADED"; currency?: string; patient_name?: string; provider_name?: string } = {
     warning_count: result.warningCount,
-    status: claimStatus,
+    status: "UPLOADED",
+    claimed_amount: result.claimedAmount,
   };
   if (result.claimedAmount) claimUpdate.claimed_amount = result.claimedAmount;
   if (result.currency) claimUpdate.currency = result.currency;
@@ -214,26 +298,10 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
       document_count: result.documentCount,
       page_count: result.pageCount,
       warning_count: result.warningCount,
-      automation_confidence: automation.confidence,
-      auto_verified: automation.eligible,
+      automation_confidence: automationConfidence,
+      awaiting_client_confirmation: true,
     },
   }];
-  if (automation.eligible) {
-    auditEvents.push({
-      claim_id: claimId,
-      actor_id: actorId,
-      event_type: "CLAIM_VERIFIED",
-      metadata: {
-        job_id: jobId,
-        field_count: rows.length,
-        document_count: result.documentCount,
-        page_count: result.pageCount,
-        warning_count: result.warningCount,
-        automation_confidence: automation.confidence,
-        auto_verified: true,
-      },
-    });
-  }
   const [{ error: claimError }, { error: jobError }, { error: auditError }] = await Promise.all([
     admin.from("claims").update(claimUpdate).eq("id", claimId),
     admin.from("claim_processing_jobs").update({ status: "COMPLETED", finished_at: now, last_error: null }).eq("id", jobId),

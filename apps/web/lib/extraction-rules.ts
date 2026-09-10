@@ -10,6 +10,33 @@ export type RuleExtractedField = {
   pageNumber: number;
 };
 
+export type ClaimDocumentType =
+  | "CLAIM_FORM"
+  | "INVOICE"
+  | "RECEIPT"
+  | "PHARMACY_RECEIPT"
+  | "MEDICAL_MEMO"
+  | "PRESCRIPTION"
+  | "MEDICAL_CERTIFICATE"
+  | "SUPPORTING_DOCUMENT"
+  | "UNKNOWN";
+
+export function classifyClaimDocument(text: string): { type: ClaimDocumentType; confidence: number; payable: boolean } {
+  const rules: Array<{ type: ClaimDocumentType; pattern: RegExp; confidence: number; payable: boolean }> = [
+    { type: "PHARMACY_RECEIPT", pattern: /\b(pharmacy|chemist|dispensary)\b[\s\S]{0,500}\b(receipt|total|paid|amount)\b/i, confidence: 0.91, payable: true },
+    { type: "INVOICE", pattern: /\b(invoice|facture|bill)\b/i, confidence: 0.94, payable: true },
+    { type: "RECEIPT", pattern: /\b(receipt|received\s+with\s+thanks|paid)\b/i, confidence: 0.92, payable: true },
+    { type: "PRESCRIPTION", pattern: /\b(prescription|rx|prescribed)\b/i, confidence: 0.88, payable: false },
+    { type: "MEDICAL_CERTIFICATE", pattern: /\bmedical\s+certificate|unfit\s+for\s+work|sick\s+leave\b/i, confidence: 0.94, payable: false },
+    { type: "CLAIM_FORM", pattern: /\bclaim\s+(?:form|number|details)|policy\s+number|amount\s+claimed\b/i, confidence: 0.89, payable: false },
+    { type: "MEDICAL_MEMO", pattern: /\b(medical\s+(?:memo|report|note)|treatment\s+note|consultation)\b/i, confidence: 0.82, payable: true },
+  ];
+  const match = rules.find((rule) => rule.pattern.test(text));
+  return match
+    ? { type: match.type, confidence: match.confidence, payable: match.payable }
+    : { type: "SUPPORTING_DOCUMENT", confidence: 0.55, payable: false };
+}
+
 function escaped(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

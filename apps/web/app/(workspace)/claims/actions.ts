@@ -11,7 +11,8 @@ import { isDemoMode } from "@/lib/config";
 import type { ClaimWorkflowState, VerificationState } from "@/lib/types";
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
-const MAX_FILES = 3;
+const MAX_FILES = 8;
+const MAX_PACKAGE_SIZE = 18 * 1024 * 1024;
 const DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const allowedTypes = new Set(["application/pdf", "image/png", "image/jpeg", DOCX_TYPE]);
 
@@ -41,6 +42,7 @@ const identityCorrectionSchema = z.object({
 
 export type ClaimFormState = { error?: string };
 export type IdentityCorrectionState = { success?: boolean; error?: string };
+export type ClaimConfirmationState = { error?: string };
 
 function revalidateClaimWorkflow(reference: string) {
   revalidatePath("/dashboard");
@@ -68,6 +70,7 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
   const viewer = await requireViewer();
   const files = formData.getAll("documents").filter((value): value is File => value instanceof File && value.size > 0);
   if (files.length < 1 || files.length > MAX_FILES) return { error: `Upload between 1 and ${MAX_FILES} documents.` };
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_PACKAGE_SIZE) return { error: "The complete claim package must be under 18 MB." };
   for (const file of files) {
     if (!allowedTypes.has(file.type) || file.size > MAX_FILE_SIZE || !(await hasValidSignature(file))) {
       return { error: `${file.name} is not a valid PDF, PNG, JPEG, or DOCX under 6 MB.` };
@@ -120,7 +123,65 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
 
   revalidatePath("/dashboard");
   revalidatePath("/claims");
-  redirect("/claims?created=1");
+  redirect(`/claims/${reference}`);
+}
+
+export async function confirmClaim(
+  reference: string,
+  _state: ClaimConfirmationState,
+  formData: FormData,
+): Promise<ClaimConfirmationState> {
+  void _state;
+  const viewer = await requireRole(["client"]);
+  const patientName = formData.get("patientName")?.toString().trim() ?? "";
+  const providerName = formData.get("providerName")?.toString().trim() ?? "";
+  if (patientName.length < 2 || providerName.length < 2) return { error: "Confirm the patient and provider names." };
+  if (isDemoMode) redirect(`/claims/${reference}?submitted=1`);
+
+  const supabase = await createClient();
+  const { data: claim, error: claimError } = await supabase
+    .from("claims")
+    .select("id,status,client_id")
+    .eq("reference", reference)
+    .maybeSingle();
+  if (claimError || !claim || claim.client_id !== viewer.id || claim.status !== "UPLOADED") {
+    return { error: "This claim is not available for confirmation." };
+  }
+  const { data: documents, error: documentError } = await supabase
+    .from("claim_documents")
+    .select("id")
+    .eq("claim_id", claim.id);
+  if (documentError || !documents?.length) return { error: "The uploaded documents could not be loaded." };
+
+  const payload = [];
+  for (const document of documents) {
+    const include = formData.get(`include-${document.id}`) === "on";
+    const amount = formData.get(`amount-${document.id}`)?.toString().trim() ?? "";
+    const currency = formData.get(`currency-${document.id}`)?.toString().trim().toUpperCase() ?? "";
+    if (include && (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0)) {
+      return { error: "Enter a valid positive amount for every included document." };
+    }
+    if (include && !["MUR", "UGX", "KES", "TZS", "USD", "EUR", "GBP"].includes(currency)) {
+      return { error: "Select a valid currency for every included document." };
+    }
+    payload.push({ id: document.id, include, amount: include ? amount : null, currency: include ? currency : null });
+  }
+  const included = payload.filter((document) => document.include);
+  if (!included.length) return { error: "Include at least one receipt, bill, memo, or other document with an expense amount." };
+  if (new Set(included.map((document) => document.currency)).size > 1) return { error: "A single claim cannot combine different currencies." };
+
+  const { error } = await supabase.rpc("confirm_claim", {
+    p_reference: reference,
+    p_patient_name: patientName,
+    p_provider_name: providerName,
+    p_documents: payload,
+  });
+  if (error) {
+    console.error("[confirmClaim] confirmation failed", { reference, error: error.message });
+    return { error: error.code === "PGRST202" ? "Apply the multi-document confirmation migration in Supabase first." : error.message };
+  }
+  revalidateClaimWorkflow(reference);
+  redirect(`/claims/${reference}?submitted=1`);
 }
 
 export async function retryClaimProcessing(reference: string) {

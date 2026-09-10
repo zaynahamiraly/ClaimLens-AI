@@ -23,16 +23,17 @@ export function ClaimForm() {
       const duplicate = unique.some((current) => current.name === file.name && current.size === file.size && current.lastModified === file.lastModified);
       if (!duplicate) unique.push(file);
     }
-    setFileNotice(unique.length > 3 ? "A claim can contain a maximum of 3 documents." : undefined);
-    syncInput(unique.slice(0, 3));
+    const packageSize = unique.reduce((total, file) => total + file.size, 0);
+    setFileNotice(unique.length > 8 ? "A claim can contain a maximum of 8 documents." : packageSize > 18 * 1024 * 1024 ? "The complete claim package must be under 18 MB." : undefined);
+    syncInput(unique.slice(0, 8));
   };
   const removeFile = (removedIndex: number) => syncInput(files.filter((_, index) => index !== removedIndex));
   return <form action={action} className="claim-form-card">
-    <label className="drop"><Upload /><b>{files.length ? "Add more claim documents" : "Select claim documents"}</b><span>1–3 PDF, PNG, JPEG, or DOCX files · maximum 6 MB each</span><input ref={inputRef} name="documents" multiple type="file" accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" required onChange={(event) => addFiles(event.currentTarget.files)} /></label>
+    <label className="drop"><Upload /><b>{files.length ? "Add more claim documents" : "Select claim documents"}</b><span>1–8 PDF, PNG, JPEG, or DOCX files · 6 MB each, 18 MB total</span><input ref={inputRef} name="documents" multiple type="file" accept="application/pdf,image/png,image/jpeg,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.docx" required onChange={(event) => addFiles(event.currentTarget.files)} /></label>
     {files.length ? <div className="selected-documents" aria-live="polite"><b>{files.length} document{files.length === 1 ? "" : "s"} ready to submit</b>{files.map((file, index) => <span key={`${file.name}-${file.lastModified}-${index}`}><FileText />{file.name}<small>{(file.size / 1024 / 1024).toFixed(2)} MB</small><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><X /></button></span>)}</div> : null}
     {fileNotice ? <p className="workflow-error" role="alert">{fileNotice}</p> : null}
     {state.error ? <p className="auth-error" role="alert">{state.error}</p> : null}
     <div className="upload-guidance"><FileText /><p><b>Patient, provider, amount, and dates are extracted automatically.</b><br />Use synthetic data only. Files are stored in a private, owner-scoped Supabase bucket.</p></div>
-    <div className="modal-actions"><button className="primary" type="submit" disabled={pending}>{pending ? "Creating claim…" : "Create & process"}<ArrowRight /></button></div>
+    <div className="modal-actions"><button className="primary" type="submit" disabled={pending || Boolean(fileNotice)}>{pending ? "Uploading and starting OCR…" : "Upload and review"}<ArrowRight /></button></div>
   </form>;
 }

@@ -189,16 +189,16 @@ Supabase Auth creates an unconfirmed user
         ↓
 Database trigger creates profiles.role = client
         ↓
-Supabase sends a confirmation email
+Supabase creates the client account
         ↓
-User opens /auth/callback through the email link
+Application clears any automatic signup session
         ↓
-Server exchanges the confirmation code for a session
+Client returns to /login
         ↓
-Client enters the protected dashboard
+When enabled, email confirmation is completed before sign-in
 ```
 
-For the simplest academic-demonstration flow, disable **Confirm email** in Supabase Authentication settings. Supabase then returns a session immediately and the application redirects the newly registered client straight to the dashboard. With confirmation enabled, the email step remains mandatory and cannot be bypassed by the browser.
+After registration, the application always returns the client to the login page. It never opens the protected portal automatically. When Supabase email confirmation is enabled, the login page clearly asks the client to confirm the email before signing in.
 
 Security properties:
 
@@ -215,19 +215,14 @@ For public delivery, configure custom SMTP under Supabase Authentication setting
 
 ### 8.1 What the user enters
 
-The current claim form collects:
+The first step collects one to eight medical documents. Patient, provider, and amount are not requested before OCR because the system extracts them from the evidence. Accepted files are PDF, PNG, JPEG, and DOCX, with a 6 MiB per-file limit and an 18 MiB package limit.
 
-- patient name;
-- healthcare provider name;
-- between one and three supporting documents.
-
-Accepted files are PDF, PNG, and JPEG, with a maximum application-level size of 6 MiB per file.
+An invoice is not mandatory. A package may contain invoices, receipts, pharmacy receipts, medical memos, prescriptions, certificates, claim forms, and other supporting documents.
 
 ### 8.2 What happens on submission
 
 1. `createClaim` calls `requireViewer` to require an authenticated, active profile.
-2. Zod validates patient and provider names.
-3. The action checks the number of files, reported MIME type, file size, and binary file signature.
+2. The action checks the number of files, package size, reported MIME type, file size, and binary file signature.
 4. A reference is generated in the form `CLM-YYYY-XXXXXXXX` using the year and a random UUID fragment.
 5. A `claims` record is created with status `PROCESSING`.
 6. For a client, `client_id` is set to that client's profile ID.
@@ -239,11 +234,14 @@ Accepted files are PDF, PNG, and JPEG, with a maximum application-level size of 
 
 8. Metadata is written to `claim_documents`.
 9. A `CLAIM_CREATED` audit event records the document count.
-10. A `claim_processing_jobs` row is created and a durable Vercel Workflow run is enqueued.
-11. The user is redirected immediately; processing continues independently of the browser request.
-12. The worker records `PROCESSING_STARTED`, downloads each private PDF, extracts embedded text, and applies deterministic label and money rules.
-13. Extracted values and provenance are stored in `claim_extracted_fields`.
-14. Success changes the claim to `REVIEW_REQUIRED`; controlled failure changes it to `PROCESSING_FAILED` and stores a safe error message.
+10. A `claim_processing_jobs` row is created and background processing is registered with Next.js `after()`.
+11. The user is redirected to the claim page, which refreshes every three seconds while processing continues.
+12. The processor downloads every private document, uses embedded PDF/DOCX text where available, and otherwise invokes OCR.
+13. Each document is independently classified and retains its own amount, currency, confidence, duplicate link, and extracted fields.
+14. Exact duplicate files and repeated document references are excluded from the proposed total. Supporting documents remain attached but are not counted.
+15. When OCR completes, the claim returns to `UPLOADED`, meaning "awaiting client confirmation". The client reviews patient/provider names and every document amount on the same claim page.
+16. The client chooses which expense documents contribute to the claim. Mixed currencies must be submitted as separate claims.
+17. `confirm_claim` calculates the total transactionally. Predictions above 85% can be auto-verified only when the client did not change them and identity/date evidence is also above 85%; otherwise the package enters `REVIEW_REQUIRED`.
 
 ### 8.3 Failure compensation
 
@@ -262,17 +260,17 @@ The current PostgreSQL enum contains these states:
 
 | Status | Meaning |
 |---|---|
-| `UPLOADED` | Documents have been received but processing has not started |
+| `UPLOADED` | OCR results are ready and the client must confirm the package |
 | `PROCESSING` | The claim is waiting for or undergoing document processing |
 | `REVIEW_REQUIRED` | Structured results require accountable human review |
-| `VERIFIED` | An authorised human has verified the claim |
+| `VERIFIED` | The package passed the guarded >85% automation rule or an authorised human verified it |
 | `APPROVED` | A Supervisor or Administrator approved the verified claim |
 | `REJECTED` | A Supervisor or Administrator rejected the verified claim |
 | `PAYMENT_PENDING` | An approved claim has entered the settlement queue |
 | `PAID` | Settlement has been recorded as complete |
 | `PROCESSING_FAILED` | Processing failed in a controlled manner |
 
-The normal successful path is `PROCESSING → REVIEW_REQUIRED → VERIFIED → APPROVED → PAYMENT_PENDING → PAID`. Rejection is an explicit alternative outcome. Every transition is validated in PostgreSQL and written to the audit history.
+The normal successful path is `PROCESSING → UPLOADED (client confirmation) → REVIEW_REQUIRED → VERIFIED → APPROVED → PAYMENT_PENDING → PAID`. A completely unchanged high-confidence package may move from client confirmation directly to `VERIFIED`. Rejection is an explicit alternative outcome. Every transition is validated in PostgreSQL and written to the audit history.
 
 ## 10. Assignment and verification
 
@@ -421,9 +419,9 @@ ClaimLens applies several controls to uploaded documents:
 - private `claim-documents` bucket;
 - authenticated uploads only;
 - owner-scoped generated folder paths;
-- one to three files per current claim form;
+- one to eight files per claim and an 18 MiB package limit;
 - 6 MiB per-file application limit;
-- PDF, PNG, and JPEG allow-list;
+- PDF, PNG, JPEG, and DOCX allow-list;
 - magic-byte signature verification to detect simple MIME spoofing;
 - Unicode filename normalisation;
 - unsafe filename characters replaced;

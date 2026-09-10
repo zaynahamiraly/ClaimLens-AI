@@ -108,7 +108,20 @@ export const getClaim = cache(async (reference: string): Promise<ClaimDTO | null
   return toDTO(row, names);
 });
 
-export type ClaimDocumentDTO = { id: string; name: string; mimeType: string; signedUrl: string };
+export type ClaimDocumentDTO = {
+  id: string;
+  name: string;
+  mimeType: string;
+  signedUrl: string;
+  documentType: string;
+  amount: number | null;
+  currency: string | null;
+  amountConfidence: number | null;
+  includeInTotal: boolean;
+  duplicateOf: string | null;
+  extractionStatus: "PENDING" | "COMPLETED" | "NEEDS_CONFIRMATION" | "FAILED";
+  notes: string | null;
+};
 
 export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDocumentDTO[]> => {
   await requireViewer();
@@ -116,14 +129,27 @@ export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDoc
   const supabase = await createClient();
   const { data: documents, error } = await supabase
     .from("claim_documents")
-    .select("id,original_name,storage_path,mime_type")
+    .select("id,original_name,storage_path,mime_type,document_type,extracted_amount,extracted_currency,amount_confidence,include_in_total,duplicate_of,extraction_status,extraction_notes")
     .eq("claim_id", claimId)
     .order("created_at", { ascending: true });
   if (error || !documents?.length) return [];
   const signedDocuments = await Promise.all(documents.map(async (document) => {
     const { data: signed } = await supabase.storage.from("claim-documents").createSignedUrl(document.storage_path, 300);
     if (!signed?.signedUrl) return null;
-    return { id: document.id as string, name: document.original_name as string, mimeType: document.mime_type as string, signedUrl: signed.signedUrl };
+    return {
+      id: document.id as string,
+      name: document.original_name as string,
+      mimeType: document.mime_type as string,
+      signedUrl: signed.signedUrl,
+      documentType: document.document_type as string,
+      amount: document.extracted_amount == null ? null : Number(document.extracted_amount),
+      currency: document.extracted_currency as string | null,
+      amountConfidence: document.amount_confidence == null ? null : Number(document.amount_confidence),
+      includeInTotal: Boolean(document.include_in_total),
+      duplicateOf: document.duplicate_of as string | null,
+      extractionStatus: document.extraction_status as ClaimDocumentDTO["extractionStatus"],
+      notes: document.extraction_notes as string | null,
+    };
   }));
   return signedDocuments.filter((document): document is ClaimDocumentDTO => document !== null);
 });

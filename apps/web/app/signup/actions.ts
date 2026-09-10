@@ -46,6 +46,6 @@ export async function signup(_state: SignupState, formData: FormData): Promise<S
     return { error: "The account could not be created. Try signing in or use a different email address." };
   }
 
-  if (data.session) redirect("/dashboard");
-  return { success: "Your account was created. Confirm it from the email, then use Sign in." };
+  if (data.session) await supabase.auth.signOut();
+  redirect(`/login?registered=1&confirmation=${data.session ? "0" : "1"}`);
 }

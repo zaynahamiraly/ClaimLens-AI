@@ -1,7 +1,7 @@
 import type { ClaimStatus } from "@/lib/types";
 
 const labels: Record<ClaimStatus, string> = {
-  UPLOADED: "Uploaded", PROCESSING: "Processing", REVIEW_REQUIRED: "Review required",
+  UPLOADED: "Awaiting confirmation", PROCESSING: "Processing", REVIEW_REQUIRED: "Review required",
   VERIFIED: "Verified", APPROVED: "Approved", REJECTED: "Rejected",
   PAYMENT_PENDING: "Payment pending", PAID: "Paid", PROCESSING_FAILED: "Processing failed",
 };
