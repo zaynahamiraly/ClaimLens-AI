@@ -297,6 +297,10 @@ The `verify_claim` function makes verification atomic:
 
 Putting these related operations in one PostgreSQL function prevents a verified status without its corresponding review and audit records.
 
+### Human corrections
+
+Claims Officers must assign an unassigned claim to themselves before correction controls become available. A claim assigned to another officer remains read-only; Supervisors and Administrators can intervene without changing assignment. `correct_claim_package` saves patient/provider corrections and every document inclusion, amount, and currency in one transaction, recalculates the claim total, preserves the original OCR prediction, and creates a `FIELD_CORRECTED` audit event. This prevents the claim summary from disagreeing with its document-level evidence.
+
 ### Decision and settlement
 
 After verification, only Supervisors and Administrators can call `decide_claim`. They must approve or reject with notes, and approval also requires an amount that cannot exceed the claimed amount. The decision is stored in `claim_decisions`, shown to the client, and audited. An approved claim can then move only from `APPROVED` to `PAYMENT_PENDING`, and from `PAYMENT_PENDING` to `PAID`, through `advance_claim_settlement`.

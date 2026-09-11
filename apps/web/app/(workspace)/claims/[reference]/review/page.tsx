@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { FileText } from "lucide-react";
+import { FileText, UserRoundCheck } from "lucide-react";
 import { notFound } from "next/navigation";
 import { ReviewWorkspace } from "@/components/review-workspace";
 import { VerificationControls } from "@/components/verification-controls";
 import { MissingIdentityForm } from "@/components/missing-identity-form";
+import { PendingSubmitButton } from "@/components/pending-submit-button";
 import { getClaim, getClaimDocuments, getClaimExtractedFields } from "@/lib/claims";
 import { requireRole } from "@/lib/auth";
-import { correctClaimIdentity, verifyClaim } from "../../actions";
+import { claimForReview, correctClaimIdentity, verifyClaim } from "../../actions";
 
 export default async function ReviewPage({
   params,
@@ -32,13 +33,20 @@ export default async function ReviewPage({
   const patientMissing = claim.patientName === "Pending extraction";
   const providerMissing = claim.providerName === "Pending extraction";
   const amountMissing = claim.amount === "Pending extraction";
-  const amountPrediction = extractedFields.find((field) => field.fieldName === "claimed_amount")?.value
-    ?? (amountMissing ? "" : claim.amount.replace(/^[A-Z]{3}\s+/, "").replaceAll(",", ""));
+  const hasIncludedDocument = documents.some((document) => document.includeInTotal);
+  const reviewDocuments = documents.map((document) => {
+    const amountField = extractedFields.find((field) => field.documentId === document.id && (field.fieldName === "claimed_amount" || field.fieldName === "invoice_total"));
+    const fallbackAmount = documents.length === 1 && !amountMissing ? Number(claim.amount.replace(/^[A-Z]{3}\s+/, "").replaceAll(",", "")) : null;
+    const amount = document.amount ?? (amountField ? Number(amountField.value) : fallbackAmount);
+    return { ...document, amount, currency: document.currency ?? (amount ? claim.currency : null), includeInTotal: hasIncludedDocument ? document.includeInTotal : Boolean(amount) };
+  });
+  const canCorrect = viewer.role !== "claims_officer" || claim.assignedTo === viewer.id;
   const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
     || patientMissing || providerMissing || amountMissing
     || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
   const verificationAction = verifyClaim.bind(null, claim.reference);
   const correctionAction = correctClaimIdentity.bind(null, claim.reference);
+  const claimAction = claimForReview.bind(null, claim.reference);
 
   return (
     <div className="review">
@@ -55,7 +63,8 @@ export default async function ReviewPage({
           status={claim.status}
         />
       </div>
-      {claim.status === "REVIEW_REQUIRED" ? <MissingIdentityForm action={correctionAction} patientValue={patientMissing ? "" : claim.patientName} providerValue={providerMissing ? "" : claim.providerName} amountValue={amountPrediction} currency={claim.currency} /> : null}
+      {claim.status === "REVIEW_REQUIRED" && canCorrect ? <MissingIdentityForm action={correctionAction} patientValue={patientMissing ? "" : claim.patientName} providerValue={providerMissing ? "" : claim.providerName} documents={reviewDocuments} /> : null}
+      {claim.status === "REVIEW_REQUIRED" && viewer.role === "claims_officer" && !canCorrect ? <section className="assignment-card review-assignment"><div><UserRoundCheck /><span><b>{claim.assignedTo ? "This claim belongs to another officer." : "Assign this claim before correcting it."}</b><small>{claim.assignedTo ? "Only the assigned officer, a supervisor, or an administrator may change reviewed evidence." : "Assignment protects the audit trail and prevents two officers from editing simultaneously."}</small></span></div>{!claim.assignedTo ? <form action={claimAction}><PendingSubmitButton className="primary" pendingLabel="Assigning…">Assign to me</PendingSubmitButton></form> : null}</section> : null}
       {isGoldenDemo || extractedFields.length ? (
         <ReviewWorkspace
           documents={documents}

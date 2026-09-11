@@ -25,6 +25,7 @@ export type ClaimProcessingDTO = {
 const STALE_JOB_AFTER_MS = 6 * 60 * 1_000;
 
 export type ExtractedFieldDTO = {
+  documentId: string | null;
   fieldName: string;
   rawValue: string;
   value: string;
@@ -129,7 +130,7 @@ export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDoc
   const supabase = await createClient();
   const { data: documents, error } = await supabase
     .from("claim_documents")
-    .select("id,original_name,storage_path,mime_type,document_type,extracted_amount,extracted_currency,amount_confidence,include_in_total,duplicate_of,extraction_status,extraction_notes")
+    .select("id,original_name,storage_path,mime_type,document_type,extracted_amount,extracted_currency,confirmed_amount,confirmed_currency,amount_confidence,include_in_total,duplicate_of,extraction_status,extraction_notes")
     .eq("claim_id", claimId)
     .order("created_at", { ascending: true });
   if (error || !documents?.length) return [];
@@ -142,8 +143,8 @@ export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDoc
       mimeType: document.mime_type as string,
       signedUrl: signed.signedUrl,
       documentType: document.document_type as string,
-      amount: document.extracted_amount == null ? null : Number(document.extracted_amount),
-      currency: document.extracted_currency as string | null,
+      amount: document.confirmed_amount == null ? document.extracted_amount == null ? null : Number(document.extracted_amount) : Number(document.confirmed_amount),
+      currency: (document.confirmed_currency ?? document.extracted_currency) as string | null,
       amountConfidence: document.amount_confidence == null ? null : Number(document.amount_confidence),
       includeInTotal: Boolean(document.include_in_total),
       duplicateOf: document.duplicate_of as string | null,
@@ -189,7 +190,7 @@ export const getClaimExtractedFields = cache(async (claimId: string): Promise<Ex
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("claim_extracted_fields")
-    .select("field_name,raw_value,normalized_value,confidence,extraction_method,page_number,claim_documents(original_name)")
+    .select("document_id,field_name,raw_value,normalized_value,confidence,extraction_method,page_number,claim_documents(original_name)")
     .eq("claim_id", claimId)
     .order("field_name", { ascending: true });
   if (error?.code === "PGRST205" || error?.code === "42P01") return [];
@@ -197,6 +198,7 @@ export const getClaimExtractedFields = cache(async (claimId: string): Promise<Ex
   return (data ?? []).map((row) => {
     const document = Array.isArray(row.claim_documents) ? row.claim_documents[0] : row.claim_documents;
     return {
+      documentId: row.document_id as string | null,
       fieldName: row.field_name as string,
       rawValue: row.raw_value as string,
       value: row.normalized_value as string,

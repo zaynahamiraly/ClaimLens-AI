@@ -33,12 +33,9 @@ const settlementSchema = z.object({
 });
 
 const identityCorrectionSchema = z.object({
-  patientName: z.string().trim().min(2).max(120).optional(),
-  providerName: z.string().trim().min(2).max(160).optional(),
-  claimedAmount: z.string().trim().regex(/^\d+(?:\.\d{1,2})?$/).optional(),
-  claimedCurrency: z.enum(["MUR", "UGX", "KES", "TZS", "USD", "EUR", "GBP"]).optional(),
-}).refine((value) => value.patientName || value.providerName || value.claimedAmount, "Enter the missing information.")
-  .refine((value) => !value.claimedAmount || value.claimedCurrency, "Select the amount currency.");
+  patientName: z.string().trim().min(2).max(120),
+  providerName: z.string().trim().min(2).max(160),
+});
 
 export type ClaimFormState = { error?: string };
 export type IdentityCorrectionState = { success?: boolean; error?: string };
@@ -233,49 +230,60 @@ export async function correctClaimIdentity(
   void _previousState;
   const viewer = await requireRole(["claims_officer", "supervisor", "administrator"]);
   const parsed = identityCorrectionSchema.safeParse({
-    patientName: formData.get("patientName")?.toString() || undefined,
-    providerName: formData.get("providerName")?.toString() || undefined,
-    claimedAmount: formData.get("claimedAmount")?.toString() || undefined,
-    claimedCurrency: formData.get("claimedCurrency")?.toString() || undefined,
+    patientName: formData.get("patientName")?.toString(),
+    providerName: formData.get("providerName")?.toString(),
   });
-  if (!parsed.success) return { error: "Enter at least two characters for each missing field." };
+  if (!parsed.success) return { error: "Confirm a valid patient and provider name." };
   if (isDemoMode) return { success: true };
 
   const supabase = await createClient();
   const { data: claim, error: claimError } = await supabase
     .from("claims")
-    .select("id,status,patient_name,provider_name,claimed_amount")
+    .select("id,status,assigned_to")
     .eq("reference", reference)
     .maybeSingle();
   if (claimError || !claim || claim.status !== "REVIEW_REQUIRED") {
-    return { error: "Missing information can only be supplied during human review." };
+    return { error: "Corrections can only be saved during human review." };
   }
-
-  const updates: { patient_name?: string; provider_name?: string; claimed_amount?: number; currency?: string } = {};
-  if (parsed.data.patientName) updates.patient_name = parsed.data.patientName;
-  if (parsed.data.providerName) updates.provider_name = parsed.data.providerName;
-  if (parsed.data.claimedAmount && parsed.data.claimedCurrency) {
-    updates.claimed_amount = Number(parsed.data.claimedAmount);
-    updates.currency = parsed.data.claimedCurrency;
+  if (viewer.role === "claims_officer" && claim.assigned_to !== viewer.id) {
+    return { error: claim.assigned_to ? "This claim is assigned to another officer." : "Assign this claim to yourself before saving corrections." };
   }
-  const { error: updateError } = await supabase.from("claims").update(updates).eq("id", claim.id);
-  if (updateError) return { error: "The missing information could not be saved." };
-
-  const events = Object.entries(updates).filter(([fieldName]) => fieldName !== "currency").map(([fieldName, value]) => ({
-    claim_id: claim.id,
-    actor_id: viewer.id,
-    event_type: "FIELD_CORRECTED",
-    metadata: {
-      field_name: fieldName,
-      previous_value: fieldName === "patient_name" ? claim.patient_name : fieldName === "provider_name" ? claim.provider_name : claim.claimed_amount,
-      corrected_value: value,
-      source: "human_entry",
-    },
-  }));
-  const { error: auditError } = await supabase.from("audit_events").insert(events);
-  if (auditError) console.error("[correctClaimIdentity] audit insert failed", { reference, error: auditError.message });
+  const { data: documents, error: documentsError } = await supabase.from("claim_documents").select("id").eq("claim_id", claim.id);
+  if (documentsError || !documents?.length) return { error: "The claim documents could not be loaded." };
+  const payload = [];
+  for (const document of documents) {
+    const include = formData.get(`include-${document.id}`) === "on";
+    const amount = formData.get(`amount-${document.id}`)?.toString().trim() ?? "";
+    const currency = formData.get(`currency-${document.id}`)?.toString().trim().toUpperCase() ?? "";
+    if (include && (!/^\d+(?:\.\d{1,2})?$/.test(amount) || Number(amount) <= 0)) return { error: "Enter a positive amount for every included document." };
+    if (include && !["MUR", "UGX", "KES", "TZS", "USD", "EUR", "GBP"].includes(currency)) return { error: "Select a currency for every included document." };
+    payload.push({ id: document.id, include, amount: include ? amount : null, currency: include ? currency : null });
+  }
+  const included = payload.filter((document) => document.include);
+  if (!included.length) return { error: "Include at least one document in the claim total." };
+  if (new Set(included.map((document) => document.currency)).size > 1) return { error: "Separate different currencies into different claims." };
+  const { error: updateError } = await supabase.rpc("correct_claim_package", {
+    p_reference: reference,
+    p_patient_name: parsed.data.patientName,
+    p_provider_name: parsed.data.providerName,
+    p_documents: payload,
+  });
+  if (updateError) {
+    console.error("[correctClaimIdentity] package correction failed", { reference, code: updateError.code, error: updateError.message });
+    return { error: updateError.code === "PGRST202" ? "Apply the transactional staff-corrections migration in Supabase first." : updateError.message };
+  }
   revalidateClaimWorkflow(reference);
   return { success: true };
+}
+
+export async function claimForReview(reference: string) {
+  const viewer = await requireRole(["claims_officer"]);
+  if (isDemoMode) redirect(`/claims/${reference}/review`);
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("assign_claim", { p_reference: reference, p_assignee: viewer.id });
+  if (error) throw new Error(error.message.includes("available") ? "This claim has already been assigned." : "The claim could not be assigned.");
+  revalidateClaimWorkflow(reference);
+  redirect(`/claims/${reference}/review`);
 }
 
 export async function decideClaim(
