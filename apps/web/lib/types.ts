@@ -68,3 +68,15 @@ export type AuditEventDTO = {
   subjectName: string | null;
   detail: string | null;
 };
+
+export type NotificationType = "ACTION_REQUIRED" | "WORKFLOW_UPDATE" | "SUCCESS" | "WARNING";
+
+export type NotificationDTO = {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  claimReference: string | null;
+  readAt: string | null;
+  createdAt: string;
+};

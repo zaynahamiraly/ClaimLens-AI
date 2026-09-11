@@ -276,6 +276,14 @@ The normal successful path is `PROCESSING → UPLOADED (client confirmation) →
 
 When evidence is incomplete, staff use `request_claim_information` instead of rejecting the claim. This moves `REVIEW_REQUIRED → INFORMATION_REQUIRED`. The client sees an Action required panel, answers the questions, and can upload up to eight supporting documents. `submit_claim_information` records the response atomically. Text-only responses return directly to `REVIEW_REQUIRED`; responses containing documents pass through `INFORMATION_RECEIVED → PROCESSING → REVIEW_REQUIRED`. The claim keeps its original assignee, and every request, response, upload, processing result, and return to review remains auditable. Internal staff notes are stored separately and are protected from Client access by RLS.
 
+### 9.1 Notifications and reminders
+
+The workspace header contains a persistent notification bell. An unread counter remains visible until the recipient opens the notification or selects **Mark all as read**. Newly received notifications appear as an eight-second popup and stay in the history panel after the popup closes. Clicking either the popup or its history entry marks it as read and opens the related claim.
+
+Notifications are produced by a PostgreSQL trigger on the immutable `audit_events` table rather than being manually duplicated across pages. This means assignments, information requests, client responses, processing failures, verified claims, decisions, and settlement updates use the same event source as the audit trail. Recipients are selected according to their role and relationship to the claim. RLS permits each authenticated user to read only their own notification rows, while guarded RPC functions perform read-state changes.
+
+Supabase Realtime publishes new notification inserts to the intended logged-in browser. The browser uses only the publishable key and authenticated session; notification privacy continues to depend on RLS. On a later visit, the newest unread item is shown once per browser session as a reminder, so dismissing a temporary popup does not discard the task or its deadline text.
+
 ## 10. Assignment and verification
 
 ### Assignment
@@ -752,7 +760,7 @@ Never commit `.env.local`. Never rename `SUPABASE_SECRET_KEY` to a `NEXT_PUBLIC_
 
 ### 25.4 Apply the database schema
 
-Use the Supabase SQL Editor to run all migrations in filename order. The DOCX migration expands the private bucket MIME allowlist. Also configure:
+Use the Supabase SQL Editor to run all migrations in filename order, including `202609110004_realtime_notifications.sql`. The notification migration creates the protected notification store, audit-event trigger, read-state RPCs, and Realtime publication entry. The DOCX migration expands the private bucket MIME allowlist. Also configure:
 
 - Authentication Site URL;
 - allowed `/auth/callback` redirect URL;
