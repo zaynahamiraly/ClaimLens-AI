@@ -7,6 +7,7 @@ import { z } from "zod";
 import { requireRole, requireViewer } from "@/lib/auth";
 import { enqueueClaimProcessing } from "@/lib/claim-processing";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { isDemoMode } from "@/lib/config";
 import type { ClaimWorkflowState, VerificationState } from "@/lib/types";
 
@@ -40,6 +41,8 @@ const identityCorrectionSchema = z.object({
 export type ClaimFormState = { error?: string };
 export type IdentityCorrectionState = { success?: boolean; error?: string };
 export type ClaimConfirmationState = { error?: string };
+export type InformationRequestState = { success?: boolean; error?: string };
+export type InformationResponseState = { success?: boolean; error?: string };
 
 function revalidateClaimWorkflow(reference: string) {
   revalidatePath("/dashboard");
@@ -192,7 +195,7 @@ export async function retryClaimProcessing(reference: string) {
     .eq("reference", reference)
     .maybeSingle();
   if (error || !claim) throw new Error("Claim is not available for processing.");
-  if (!(["UPLOADED", "PROCESSING", "PROCESSING_FAILED"] as string[]).includes(claim.status)) {
+  if (!(["UPLOADED", "PROCESSING", "PROCESSING_FAILED", "INFORMATION_RECEIVED"] as string[]).includes(claim.status)) {
     throw new Error("Only pending or failed claims can be processed.");
   }
 
@@ -361,4 +364,131 @@ export async function assignClaim(reference: string, formData?: FormData) {
   revalidatePath("/claims");
   revalidatePath(`/claims/${reference}`);
   redirect(`/claims/${reference}`);
+}
+
+export async function requestAdditionalInformation(
+  reference: string,
+  _previousState: InformationRequestState,
+  formData: FormData,
+): Promise<InformationRequestState> {
+  void _previousState;
+  await requireRole(["claims_officer", "supervisor", "administrator"]);
+  const parsed = z.object({
+    reason: z.string().trim().min(5, "Explain why more information is required.").max(500),
+    questions: z.string().trim().min(5, "Enter a clear question or instruction for the client.").max(2000),
+    deadline: z.string().trim().regex(/^$|^\d{4}-\d{2}-\d{2}$/, "Select a valid deadline."),
+    internalNote: z.string().trim().max(2000),
+  }).safeParse({
+    reason: formData.get("reason")?.toString(),
+    questions: formData.get("questions")?.toString(),
+    deadline: formData.get("deadline")?.toString() ?? "",
+    internalNote: formData.get("internalNote")?.toString() ?? "",
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the request details." };
+  const requiredDocuments = formData.getAll("requiredDocuments")
+    .map((value) => value.toString().trim())
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .slice(0, 10);
+  if (isDemoMode) return { success: true };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("request_claim_information", {
+    p_reference: reference,
+    p_reason: parsed.data.reason,
+    p_questions: parsed.data.questions,
+    p_required_documents: requiredDocuments,
+    p_response_deadline: parsed.data.deadline || null,
+    p_internal_note: parsed.data.internalNote || null,
+  });
+  if (error) {
+    console.error("[requestAdditionalInformation] request failed", { reference, error: error.message });
+    return { error: error.code === "PGRST202" ? "Apply the additional-information migration in Supabase first." : error.message };
+  }
+  revalidateClaimWorkflow(reference);
+  return { success: true };
+}
+
+export async function submitAdditionalInformation(
+  reference: string,
+  requestId: string,
+  _previousState: InformationResponseState,
+  formData: FormData,
+): Promise<InformationResponseState> {
+  void _previousState;
+  const viewer = await requireRole(["client"]);
+  const responseText = formData.get("responseText")?.toString().trim() ?? "";
+  if (responseText.length > 2000) return { error: "The response must be under 2,000 characters." };
+  const files = formData.getAll("documents").filter((value): value is File => value instanceof File && value.size > 0);
+  if (!responseText && files.length === 0) return { error: "Provide an answer or upload at least one document." };
+  if (files.length > MAX_FILES) return { error: `Upload no more than ${MAX_FILES} documents.` };
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_PACKAGE_SIZE) return { error: "The complete response package must be under 18 MB." };
+  for (const file of files) {
+    if (!allowedTypes.has(file.type) || file.size > MAX_FILE_SIZE || !(await hasValidSignature(file))) {
+      return { error: `${file.name} is not a valid PDF, PNG, JPEG, or DOCX under 6 MB.` };
+    }
+  }
+  if (isDemoMode) return { success: true };
+
+  const supabase = await createClient();
+  const { data: claim, error: claimError } = await supabase
+    .from("claims")
+    .select("id,client_id,status")
+    .eq("reference", reference)
+    .maybeSingle();
+  if (claimError || !claim || claim.client_id !== viewer.id || claim.status !== "INFORMATION_REQUIRED") {
+    return { error: "This claim is not waiting for information from your account." };
+  }
+  const { data: request, error: requestError } = await supabase
+    .from("claim_information_requests")
+    .select("id,status,claim_id")
+    .eq("id", requestId)
+    .eq("claim_id", claim.id)
+    .maybeSingle();
+  if (requestError || !request || request.status !== "OPEN") return { error: "This information request is no longer open." };
+
+  const uploadedPaths: string[] = [];
+  const documentIds: string[] = [];
+  try {
+    for (const file of files) {
+      const path = `${viewer.id}/${claim.id}/${randomUUID()}-${safeFilename(file.name)}`;
+      const { error: uploadError } = await supabase.storage.from("claim-documents").upload(path, file, { contentType: file.type, upsert: false });
+      if (uploadError) throw uploadError;
+      uploadedPaths.push(path);
+      const { data: document, error: documentError } = await supabase.from("claim_documents").insert({
+        claim_id: claim.id,
+        uploaded_by: viewer.id,
+        information_request_id: requestId,
+        document_type: "UNKNOWN",
+        original_name: file.name,
+        storage_path: path,
+        mime_type: file.type,
+        size_bytes: file.size,
+      }).select("id").single();
+      if (documentError || !document) throw documentError ?? new Error("Document row was not created.");
+      documentIds.push(document.id as string);
+    }
+    const { error: responseError } = await supabase.rpc("submit_claim_information", {
+      p_reference: reference,
+      p_request_id: requestId,
+      p_response_text: responseText,
+      p_document_count: files.length,
+    });
+    if (responseError) throw responseError;
+  } catch (error) {
+    const admin = createAdminClient();
+    if (documentIds.length) await admin.from("claim_documents").delete().in("id", documentIds);
+    if (uploadedPaths.length) await admin.storage.from("claim-documents").remove(uploadedPaths);
+    console.error("[submitAdditionalInformation] compensated failed response", { reference, requestId, error: String(error) });
+    return { error: "The response could not be submitted. No partial upload was retained." };
+  }
+
+  if (files.length) {
+    try {
+      await enqueueClaimProcessing(claim.id as string, viewer.id);
+    } catch (error) {
+      console.error("[submitAdditionalInformation] processing enqueue failed", { claimId: claim.id, error: String(error) });
+    }
+  }
+  revalidateClaimWorkflow(reference);
+  redirect(`/claims/${reference}?information=received`);
 }

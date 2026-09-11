@@ -41,7 +41,7 @@ export default async function ReviewPage({
     return { ...document, amount, currency: document.currency ?? (amount ? claim.currency : null), includeInTotal: hasIncludedDocument ? document.includeInTotal : Boolean(amount) };
   });
   const canCorrect = viewer.role !== "claims_officer" || claim.assignedTo === viewer.id;
-  const verificationDisabled = isVerified || claim.status === "PROCESSING" || claim.status === "UPLOADED"
+  const verificationDisabled = isVerified || claim.status !== "REVIEW_REQUIRED"
     || patientMissing || providerMissing || amountMissing
     || (viewer.role === "claims_officer" && claim.assignedTo !== viewer.id);
   const verificationAction = verifyClaim.bind(null, claim.reference);

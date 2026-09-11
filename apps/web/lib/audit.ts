@@ -33,6 +33,12 @@ function eventDetail(row: AuditRow) {
     return `${notes}${typeof amount === "number" ? ` · Approved MUR ${amount.toLocaleString("en-MU", { minimumFractionDigits: 2 })}` : ""}`;
   }
   if (row.event_type === "CLAIM_REJECTED" && typeof notes === "string") return notes;
+  if (row.event_type === "INFORMATION_REQUESTED" && typeof reason === "string") return reason;
+  const documentCount = row.metadata?.document_count;
+  if (row.event_type === "INFORMATION_RECEIVED" && typeof documentCount === "number") {
+    return `${documentCount} supporting document${documentCount === 1 ? "" : "s"} supplied`;
+  }
+  if (row.event_type === "INFORMATION_PROCESSED") return "Additional information processed and returned to review";
   return null;
 }
 

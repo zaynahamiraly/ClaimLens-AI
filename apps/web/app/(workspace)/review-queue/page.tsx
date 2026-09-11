@@ -6,7 +6,7 @@ import { listClaims } from "@/lib/claims";
 export default async function ReviewQueuePage() {
   const [viewer, reviewClaims, verifiedClaims] = await Promise.all([
     requireRole(["claims_officer", "supervisor", "administrator"]),
-    listClaims("", 100, "REVIEW_REQUIRED"),
+    listClaims("", 100, ["REVIEW_REQUIRED", "INFORMATION_RECEIVED"]),
     listClaims("", 100, "VERIFIED"),
   ]);
   const visible = viewer.role === "claims_officer"

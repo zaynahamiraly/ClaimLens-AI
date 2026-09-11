@@ -133,6 +133,21 @@ export type ClaimDocumentDTO = {
   duplicateOf: string | null;
   extractionStatus: "PENDING" | "COMPLETED" | "NEEDS_CONFIRMATION" | "FAILED";
   notes: string | null;
+  informationRequestId: string | null;
+};
+
+export type ClaimInformationRequestDTO = {
+  id: string;
+  reason: string;
+  questions: string;
+  requiredDocuments: string[];
+  responseDeadline: string | null;
+  status: "OPEN" | "RESPONDED" | "COMPLETED" | "CANCELLED";
+  requestedAt: string;
+  requestedBy: string;
+  respondedAt: string | null;
+  responseText: string | null;
+  internalNote: string | null;
 };
 
 export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDocumentDTO[]> => {
@@ -141,7 +156,7 @@ export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDoc
   const supabase = await createClient();
   const { data: documents, error } = await supabase
     .from("claim_documents")
-    .select("id,original_name,storage_path,mime_type,document_type,extracted_amount,extracted_currency,confirmed_amount,confirmed_currency,amount_confidence,include_in_total,duplicate_of,extraction_status,extraction_notes")
+    .select("id,original_name,storage_path,mime_type,document_type,extracted_amount,extracted_currency,confirmed_amount,confirmed_currency,amount_confidence,include_in_total,duplicate_of,extraction_status,extraction_notes,information_request_id")
     .eq("claim_id", claimId)
     .order("created_at", { ascending: true });
   if (error || !documents?.length) return [];
@@ -161,9 +176,50 @@ export const getClaimDocuments = cache(async (claimId: string): Promise<ClaimDoc
       duplicateOf: document.duplicate_of as string | null,
       extractionStatus: document.extraction_status as ClaimDocumentDTO["extractionStatus"],
       notes: document.extraction_notes as string | null,
+      informationRequestId: document.information_request_id as string | null,
     };
   }));
   return signedDocuments.filter((document): document is ClaimDocumentDTO => document !== null);
+});
+
+export const getClaimInformationRequests = cache(async (claimId: string): Promise<ClaimInformationRequestDTO[]> => {
+  const viewer = await requireViewer();
+  if (isDemoMode) return [];
+  const supabase = await createClient();
+  const { data: requests, error } = await supabase
+    .from("claim_information_requests")
+    .select("id,requested_by,reason,questions,required_documents,response_deadline,status,created_at,responded_at")
+    .eq("claim_id", claimId)
+    .order("created_at", { ascending: false });
+  if (error?.code === "PGRST205" || error?.code === "42P01") return [];
+  if (error) throw new Error("Unable to load information requests.");
+  if (!requests?.length) return [];
+  const requestIds = requests.map((request) => request.id as string);
+  const requesterIds = [...new Set(requests.map((request) => request.requested_by as string))];
+  const [responsesResult, profilesResult, notesResult] = await Promise.all([
+    supabase.from("claim_information_responses").select("request_id,response_text,created_at").in("request_id", requestIds),
+    supabase.from("profiles").select("id,display_name").in("id", requesterIds),
+    viewer.role === "client"
+      ? Promise.resolve({ data: [], error: null })
+      : supabase.from("claim_information_internal_notes").select("request_id,note").in("request_id", requestIds),
+  ]);
+  if (responsesResult.error || notesResult.error) throw new Error("Unable to load information request responses.");
+  const responses = new Map((responsesResult.data ?? []).map((response) => [response.request_id as string, response.response_text as string]));
+  const names = new Map((profilesResult.data ?? []).map((profile) => [profile.id as string, profile.display_name as string]));
+  const notes = new Map((notesResult.data ?? []).map((note) => [note.request_id as string, note.note as string]));
+  return requests.map((request) => ({
+    id: request.id as string,
+    reason: request.reason as string,
+    questions: request.questions as string,
+    requiredDocuments: (request.required_documents ?? []) as string[],
+    responseDeadline: request.response_deadline as string | null,
+    status: request.status as ClaimInformationRequestDTO["status"],
+    requestedAt: request.created_at as string,
+    requestedBy: names.get(request.requested_by as string) ?? "Claims team",
+    respondedAt: request.responded_at as string | null,
+    responseText: responses.get(request.id as string) ?? null,
+    internalNote: notes.get(request.id as string) ?? null,
+  }));
 });
 
 export const getClaimProcessing = cache(async (claimId: string): Promise<ClaimProcessingDTO | null> => {

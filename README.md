@@ -263,6 +263,8 @@ The current PostgreSQL enum contains these states:
 | `UPLOADED` | OCR results are ready and the client must confirm the package |
 | `PROCESSING` | The claim is waiting for or undergoing document processing |
 | `REVIEW_REQUIRED` | Structured results require accountable human review |
+| `INFORMATION_REQUIRED` | Review is paused while the client answers a specific request or uploads evidence |
+| `INFORMATION_RECEIVED` | The client responded and newly supplied documents are being processed |
 | `VERIFIED` | The package passed the guarded >85% automation rule or an authorised human verified it |
 | `APPROVED` | A Supervisor or Administrator approved the verified claim |
 | `REJECTED` | A Supervisor or Administrator rejected the verified claim |
@@ -271,6 +273,8 @@ The current PostgreSQL enum contains these states:
 | `PROCESSING_FAILED` | Processing failed in a controlled manner |
 
 The normal successful path is `PROCESSING → UPLOADED (client confirmation) → REVIEW_REQUIRED → VERIFIED → APPROVED → PAYMENT_PENDING → PAID`. A completely unchanged high-confidence package may move from client confirmation directly to `VERIFIED`. Rejection is an explicit alternative outcome. Every transition is validated in PostgreSQL and written to the audit history.
+
+When evidence is incomplete, staff use `request_claim_information` instead of rejecting the claim. This moves `REVIEW_REQUIRED → INFORMATION_REQUIRED`. The client sees an Action required panel, answers the questions, and can upload up to eight supporting documents. `submit_claim_information` records the response atomically. Text-only responses return directly to `REVIEW_REQUIRED`; responses containing documents pass through `INFORMATION_RECEIVED → PROCESSING → REVIEW_REQUIRED`. The claim keeps its original assignee, and every request, response, upload, processing result, and return to review remains auditable. Internal staff notes are stored separately and are protected from Client access by RLS.
 
 ## 10. Assignment and verification
 
@@ -354,6 +358,9 @@ Supabase applies Row Level Security to profiles, claims, documents, reviews, aud
 | `claim_documents` | Metadata for private files | Claim, uploader, type, original name, storage path, MIME type, size |
 | `claim_reviews` | Human review record | Claim, reviewer, status, comments, start and finish times |
 | `claim_decisions` | Supervisor outcome | Claim, outcome, approved amount, notes, decision-maker, timestamp |
+| `claim_information_requests` | Additional-information request | Claim, reason, questions, requested document types, deadline and state |
+| `claim_information_responses` | Client response | Request, client answer and submission time |
+| `claim_information_internal_notes` | Staff-only request context | Request, author, private note and timestamp |
 | `audit_events` | Append-only business history | Claim or user subject, actor, event type, JSON metadata, timestamp |
 | `storage.objects` | Supabase-managed stored object metadata | Private bucket, path, owner, object metadata |
 
@@ -368,6 +375,8 @@ erDiagram
     CLAIMS ||--o{ CLAIM_DOCUMENTS : contains
     CLAIMS ||--o{ CLAIM_REVIEWS : reviewed_by
     CLAIMS ||--o| CLAIM_DECISIONS : receives
+    CLAIMS ||--o{ CLAIM_INFORMATION_REQUESTS : requests
+    CLAIM_INFORMATION_REQUESTS ||--o| CLAIM_INFORMATION_RESPONSES : receives
     CLAIMS ||--o{ AUDIT_EVENTS : records
     AUTH_USERS ||--o{ AUDIT_EVENTS : acts
 ```
@@ -383,6 +392,8 @@ erDiagram
 | `public.verify_claim(text)` | Atomically verifies the claim and records review/audit data |
 | `public.decide_claim(...)` | Atomically approves or rejects a verified claim |
 | `public.advance_claim_settlement(text, text)` | Enforces approved-to-pending-to-paid transitions |
+| `public.request_claim_information(...)` | Pauses review and atomically creates a client-facing information request |
+| `public.submit_claim_information(...)` | Records the client response and safely returns the claim to processing or review |
 | `public.admin_update_user_profile(...)` | Allows administrators to change role/status and records the event |
 
 ### 12.4 Migration order
@@ -395,6 +406,11 @@ Run migrations in this order:
 4. `supabase/migrations/202609070001_claim_processing.sql`
 5. `supabase/migrations/202609070002_claim_decision_schema.sql`
 6. `supabase/migrations/202609070003_claim_decision_workflow.sql`
+7. `supabase/migrations/202609080001_docx_documents.sql`
+8. `supabase/migrations/202609100001_multi_document_claim_confirmation.sql`
+9. `supabase/migrations/202609110001_transactional_staff_corrections.sql`
+10. `supabase/migrations/202609110002_meaningful_claim_references.sql`
+11. `supabase/migrations/202609110003_additional_information_workflow.sql`
 
 The schema is changed through migrations rather than manual production edits, which makes the system reproducible and auditable.
 

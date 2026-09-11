@@ -9,7 +9,7 @@ import type { ClaimDTO, ClaimStatus } from "@/lib/types";
 
 const DAY_MS = 86_400_000;
 const COMPLETED_STATUSES = new Set<ClaimStatus>(["VERIFIED", "APPROVED", "REJECTED", "PAYMENT_PENDING", "PAID"]);
-const statusOrder: ClaimStatus[] = ["PROCESSING", "UPLOADED", "REVIEW_REQUIRED", "VERIFIED", "APPROVED", "PAYMENT_PENDING", "PAID", "REJECTED", "PROCESSING_FAILED"];
+const statusOrder: ClaimStatus[] = ["PROCESSING", "UPLOADED", "INFORMATION_REQUIRED", "INFORMATION_RECEIVED", "REVIEW_REQUIRED", "VERIFIED", "APPROVED", "PAYMENT_PENDING", "PAID", "REJECTED", "PROCESSING_FAILED"];
 const ranges = [
   { value: "today", label: "Today", days: 1 },
   { value: "7d", label: "7 days", days: 7 },
@@ -56,7 +56,7 @@ function formatMinutes(milliseconds: number | null) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-function claimsUrl(options: { status?: ClaimStatus; view?: "processing" | "completed"; mine: boolean; from?: string; to?: string }) {
+function claimsUrl(options: { status?: ClaimStatus; view?: "processing" | "completed" | "review"; mine: boolean; from?: string; to?: string }) {
   const query = new URLSearchParams();
   if (options.status) query.set("status", options.status);
   if (options.view) query.set("view", options.view);
@@ -106,7 +106,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
   const jobs = supplement.jobs.filter((job) => claimIds.has(job.claimId));
   const available = isOfficer ? allClaims.filter((claim) => !claim.assignedTo && claim.status === "REVIEW_REQUIRED").length : 0;
   const processing = claims.filter((claim) => claim.status === "PROCESSING" || claim.status === "UPLOADED").length;
-  const review = claims.filter((claim) => claim.status === "REVIEW_REQUIRED").length;
+  const review = claims.filter((claim) => claim.status === "REVIEW_REQUIRED" || claim.status === "INFORMATION_RECEIVED").length;
   const completed = claims.filter((claim) => COMPLETED_STATUSES.has(claim.status)).length;
   const failed = claims.filter((claim) => claim.status === "PROCESSING_FAILED").length;
   const confidence = fields.length ? Math.round((fields.reduce((sum, field) => sum + field.confidence, 0) / fields.length) * 100) : null;
@@ -155,7 +155,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
     };
   });
   const trendMaximum = Math.max(1, ...trend.flatMap((point) => [point.received, point.completed]));
-  const metricUrl = (options: { status?: ClaimStatus; view?: "processing" | "completed" }) => claimsUrl({ ...options, mine: isOfficer, from: fromDate, to: toDate });
+  const metricUrl = (options: { status?: ClaimStatus; view?: "processing" | "completed" | "review" }) => claimsUrl({ ...options, mine: isOfficer, from: fromDate, to: toDate });
   const currentUrl = selectedRange === "custom" && customValid
     ? `/analytics?range=custom&from=${customFrom}&to=${customTo}`
     : `/analytics?range=${selectedRange}`;
@@ -171,7 +171,7 @@ export default async function AnalyticsPage({ searchParams }: { searchParams: Pr
 
     <section className="metrics analytics-metrics">
       <Link aria-label={`View ${processing} processing claims`} href={metricUrl({ view: "processing" })}><article><div className="metric-icon blue"><Clock3 /></div><span>Processing</span><strong>{processing}</strong><small>{isOfficer && available ? `${available} unassigned claims available` : comparison(claims.length, previousClaims.length)}</small></article></Link>
-      <Link aria-label={`View ${review} claims requiring review`} href={metricUrl({ status: "REVIEW_REQUIRED" })}><article><div className="metric-icon amber"><AlertTriangle /></div><span>Review backlog</span><strong>{review}</strong><small>{percentage(review, claims.length)}% of claims in this period</small></article></Link>
+      <Link aria-label={`View ${review} claims requiring review`} href={metricUrl({ view: "review" })}><article><div className="metric-icon amber"><AlertTriangle /></div><span>Review backlog</span><strong>{review}</strong><small>{percentage(review, claims.length)}% of claims in this period</small></article></Link>
       <Link aria-label={`View ${completed} completed claims`} href={metricUrl({ view: "completed" })}><article><div className="metric-icon green"><CheckCircle2 /></div><span>Completed workflow</span><strong>{completed}</strong><small>{percentage(completed, claims.length)}% of claims in scope</small></article></Link>
       <Link aria-label={`View ${failed} failed claims`} href={metricUrl({ status: "PROCESSING_FAILED" })}><article><div className="metric-icon violet"><Gauge /></div><span>Processing failures</span><strong>{failed}</strong><small>{percentage(failed, claims.length)}% failure rate</small></article></Link>
     </section>

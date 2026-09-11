@@ -2,6 +2,8 @@ export type ClaimStatus =
   | "UPLOADED"
   | "PROCESSING"
   | "REVIEW_REQUIRED"
+  | "INFORMATION_REQUIRED"
+  | "INFORMATION_RECEIVED"
   | "VERIFIED"
   | "APPROVED"
   | "REJECTED"

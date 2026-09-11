@@ -113,12 +113,22 @@ async function markStarted(jobId: string, claimId: string, actorId: string) {
     .select("id")
     .maybeSingle();
   if (jobError) throw new Error(jobError.message);
-  if (!startedJob) return;
+  if (!startedJob) return { started: false, informationRequestId: null };
+  const { data: informationRequest, error: informationError } = await admin
+    .from("claim_information_requests")
+    .select("id")
+    .eq("claim_id", claimId)
+    .eq("status", "RESPONDED")
+    .order("responded_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (informationError) throw new Error(informationError.message);
   const [{ error: claimError }, { error: auditError }] = await Promise.all([
     admin.from("claims").update({ status: "PROCESSING" }).eq("id", claimId),
     admin.from("audit_events").insert({ claim_id: claimId, actor_id: actorId, event_type: "PROCESSING_STARTED", metadata: { job_id: jobId, pipeline: "A", pipeline_version: "1.0.0" } }),
   ]);
   if (claimError || auditError) throw new Error(claimError?.message ?? auditError?.message);
+  return { started: true, informationRequestId: informationRequest?.id as string | undefined ?? null };
 }
 
 async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
@@ -241,7 +251,7 @@ async function extractDocuments(claimId: string): Promise<ExtractionOutcome> {
     } };
 }
 
-async function saveCompleted(jobId: string, claimId: string, actorId: string, result: ExtractionResult) {
+async function saveCompleted(jobId: string, claimId: string, actorId: string, result: ExtractionResult, informationRequestId: string | null) {
   console.log("[claim-processing] saving completed result", { jobId, claimId, fieldCount: result.fields.length });
   const admin = createAdminClient();
   const rows = result.fields.map((field) => ({
@@ -279,16 +289,16 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
   const bestField = (name: string) => result.fields.filter((field) => field.fieldName === name).sort((left, right) => right.confidence - left.confidence)[0];
   const patientName = bestField("patient_name")?.normalizedValue;
   const providerName = bestField("provider_name")?.normalizedValue;
-  const claimUpdate: { claimed_amount?: string | null; warning_count: number; status: "UPLOADED"; currency?: string; patient_name?: string; provider_name?: string } = {
+  const claimUpdate: { claimed_amount?: string | null; warning_count: number; status: "UPLOADED" | "REVIEW_REQUIRED"; currency?: string; patient_name?: string; provider_name?: string } = {
     warning_count: result.warningCount,
-    status: "UPLOADED",
+    status: informationRequestId ? "REVIEW_REQUIRED" : "UPLOADED",
     claimed_amount: result.claimedAmount,
   };
   if (result.claimedAmount) claimUpdate.claimed_amount = result.claimedAmount;
   if (result.currency) claimUpdate.currency = result.currency;
   if (patientName) claimUpdate.patient_name = patientName;
   if (providerName) claimUpdate.provider_name = providerName;
-  const auditEvents = [{
+  const auditEvents: Array<{ claim_id: string; actor_id: string; event_type: string; metadata: Record<string, unknown> }> = [{
     claim_id: claimId,
     actor_id: actorId,
     event_type: "PROCESSING_COMPLETED",
@@ -299,15 +309,26 @@ async function saveCompleted(jobId: string, claimId: string, actorId: string, re
       page_count: result.pageCount,
       warning_count: result.warningCount,
       automation_confidence: automationConfidence,
-      awaiting_client_confirmation: true,
+      awaiting_client_confirmation: !informationRequestId,
+      information_request_id: informationRequestId,
     },
   }];
-  const [{ error: claimError }, { error: jobError }, { error: auditError }] = await Promise.all([
+  if (informationRequestId) auditEvents.push({
+    claim_id: claimId,
+    actor_id: actorId,
+    event_type: "INFORMATION_PROCESSED",
+    metadata: { information_request_id: informationRequestId, returned_to_review: true },
+  });
+  const informationUpdate = informationRequestId
+    ? admin.from("claim_information_requests").update({ status: "COMPLETED", completed_at: now }).eq("id", informationRequestId).eq("status", "RESPONDED")
+    : Promise.resolve({ error: null });
+  const [{ error: claimError }, { error: jobError }, { error: auditError }, { error: informationError }] = await Promise.all([
     admin.from("claims").update(claimUpdate).eq("id", claimId),
     admin.from("claim_processing_jobs").update({ status: "COMPLETED", finished_at: now, last_error: null }).eq("id", jobId),
     admin.from("audit_events").insert(auditEvents),
+    informationUpdate,
   ]);
-  if (claimError || jobError || auditError) throw new Error(claimError?.message ?? jobError?.message ?? auditError?.message);
+  if (claimError || jobError || auditError || informationError) throw new Error(claimError?.message ?? jobError?.message ?? auditError?.message ?? informationError?.message);
 }
 
 async function saveFailed(jobId: string, claimId: string, actorId: string, reason: string) {
@@ -341,14 +362,15 @@ function errorMessage(error: unknown): string {
 }
 
 export async function processClaim(jobId: string, claimId: string, actorId: string) {
-  await markStarted(jobId, claimId, actorId);
+  const context = await markStarted(jobId, claimId, actorId);
+  if (!context.started) return { status: "already-started" };
   try {
     const outcome = await extractDocuments(claimId);
     if (!outcome.ok) {
       await saveFailed(jobId, claimId, actorId, outcome.reason);
       return { status: "failed", reason: outcome.reason };
     }
-    await saveCompleted(jobId, claimId, actorId, outcome.result);
+    await saveCompleted(jobId, claimId, actorId, outcome.result, context.informationRequestId);
     return { status: "completed", fieldCount: outcome.result.fields.length };
   } catch (error) {
     const reason = errorMessage(error);

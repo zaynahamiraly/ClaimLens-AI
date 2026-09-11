@@ -8,11 +8,13 @@ import type { ClaimStatus } from "@/lib/types";
 const statuses = new Set<ClaimStatus>([
   "UPLOADED", "PROCESSING", "REVIEW_REQUIRED", "VERIFIED", "APPROVED", "REJECTED",
   "PAYMENT_PENDING", "PAID", "PROCESSING_FAILED",
+  "INFORMATION_REQUIRED", "INFORMATION_RECEIVED",
 ]);
 
 const groupedStatuses = {
   processing: ["UPLOADED", "PROCESSING"],
   completed: ["VERIFIED", "APPROVED", "REJECTED", "PAYMENT_PENDING", "PAID"],
+  review: ["REVIEW_REQUIRED", "INFORMATION_RECEIVED"],
 } satisfies Record<string, ClaimStatus[]>;
 
 function validDate(value?: string) {
@@ -21,7 +23,7 @@ function validDate(value?: string) {
 
 export default async function ClaimsPage({ searchParams }: { searchParams: Promise<{ q?: string; created?: string; status?: string; view?: string; mine?: string; from?: string; to?: string }> }) {
   const [{ q = "", created, status, view, mine, from, to }, viewer] = await Promise.all([searchParams, requireViewer()]);
-  const groupedView = view === "processing" || view === "completed" ? view : undefined;
+  const groupedView = view === "processing" || view === "completed" || view === "review" ? view : undefined;
   const statusFilter: ClaimStatus | ClaimStatus[] | undefined = groupedView
     ? groupedStatuses[groupedView]
     : statuses.has(status as ClaimStatus) ? status as ClaimStatus : undefined;
