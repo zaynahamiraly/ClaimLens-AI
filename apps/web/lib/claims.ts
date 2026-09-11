@@ -63,14 +63,23 @@ async function profileNames(rows: ClaimRow[]) {
   return new Map((data ?? []).map((profile) => [profile.id as string, profile.display_name as string]));
 }
 
-export async function listClaims(query = "", limit = 50, status?: ClaimStatus, assignedTo?: string): Promise<ClaimDTO[]> {
+export async function listClaims(
+  query = "",
+  limit = 50,
+  status?: ClaimStatus | ClaimStatus[],
+  assignedTo?: string,
+  createdFrom?: string,
+  createdBefore?: string,
+): Promise<ClaimDTO[]> {
   await requireViewer();
   const normalized = query.trim().toLowerCase();
   if (isDemoMode) {
     return DEMO_CLAIMS.filter((claim) =>
       `${claim.reference} ${claim.patientName} ${claim.providerName}`.toLowerCase().includes(normalized),
-    ).filter((claim) => !status || claim.status === status)
+    ).filter((claim) => !status || (Array.isArray(status) ? status.includes(claim.status) : claim.status === status))
       .filter((claim) => !assignedTo || claim.assignedTo === assignedTo)
+      .filter((claim) => !createdFrom || claim.createdAt >= createdFrom)
+      .filter((claim) => !createdBefore || claim.createdAt < createdBefore)
       .slice(0, limit);
   }
 
@@ -84,8 +93,10 @@ export async function listClaims(query = "", limit = 50, status?: ClaimStatus, a
     const safe = query.trim().replace(/[,%()]/g, "");
     request = request.or(`reference.ilike.%${safe}%,patient_name.ilike.%${safe}%,provider_name.ilike.%${safe}%`);
   }
-  if (status) request = request.eq("status", status);
+  if (status) request = Array.isArray(status) ? request.in("status", status) : request.eq("status", status);
   if (assignedTo) request = request.eq("assigned_to", assignedTo);
+  if (createdFrom) request = request.gte("created_at", createdFrom);
+  if (createdBefore) request = request.lt("created_at", createdBefore);
   const { data, error } = await request;
   if (error) throw new Error("Unable to load claims.");
   const rows = data as ClaimRow[];
