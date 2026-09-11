@@ -236,11 +236,12 @@ a { color: inherit; text-decoration: none; }
 .information-form-card .decision-heading>svg,.information-action-heading>svg { color:#b06c07; }
 .information-form { display:flex; flex-direction:column; gap:14px; margin-top:18px; }
 .information-form>label,.information-form-row>label,.information-response-form>label { display:flex; flex-direction:column; gap:7px; font-size:10px; font-weight:800; }
-.information-form input,.information-form textarea,.information-response-form textarea { width:100%; border:1px solid #d8e0e8; border-radius:7px; padding:10px; background:white; resize:vertical; }
+.information-form>label>input,.information-form>label>textarea,.information-form-row input,.information-form-row textarea,.information-response-form textarea { width:100%; border:1px solid #d8e0e8; border-radius:7px; padding:10px; background:white; resize:vertical; }
 .information-form fieldset { margin:0; padding:12px; border:1px solid var(--line); border-radius:8px; }
 .information-form legend { padding:0 6px; font-size:10px; font-weight:800; }
-.information-document-options { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
-.information-document-options label { display:flex; align-items:center; gap:7px; color:#536d80; font-size:10px; }
+.information-document-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 24px; }
+.information-document-options label { display:flex; align-items:center; justify-content:flex-start; min-width:0; gap:8px; color:#536d80; font-size:10px; line-height:1.4; }
+.information-document-options input { width:14px; height:14px; margin:0; padding:0; flex:0 0 14px; }
 .information-form-row { display:grid; grid-template-columns:.65fr 1.35fr; gap:14px; }
 .information-form .primary { align-self:flex-start; }
 .information-success,.information-waiting { margin-top:18px; display:flex; align-items:flex-start; gap:11px; padding:16px; border:1px solid #b8e4d0; background:#eaf8f2; color:#147355; border-radius:9px; }
