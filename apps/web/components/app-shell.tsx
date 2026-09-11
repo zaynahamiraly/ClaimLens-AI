@@ -18,9 +18,9 @@ function navigation(viewer: ViewerDTO) {
     { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
     { href: "/claims", label: "Claims queue", icon: FileText },
     { href: "/review-queue", label: "Review queue", icon: FileCheck2 },
+    { href: "/analytics", label: "Analytics", icon: Activity },
     { href: "/audit", label: "Audit trail", icon: ShieldCheck },
   ];
-  if (viewer.role === "supervisor" || viewer.role === "administrator") links.push({ href: "/analytics", label: "Analytics", icon: Activity });
   if (viewer.role === "administrator") links.push({ href: "/admin/users", label: "User access", icon: UserCog });
   return links;
 }

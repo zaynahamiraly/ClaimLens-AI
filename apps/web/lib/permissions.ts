@@ -28,5 +28,5 @@ export function canManageUsers(role: UserRole) {
 }
 
 export function canViewAnalytics(role: UserRole) {
-  return hasRole(role, MANAGEMENT_ROLES);
+  return hasRole(role, STAFF_ROLES);
 }

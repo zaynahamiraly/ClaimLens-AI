@@ -223,7 +223,7 @@ An invoice is not mandatory. A package may contain invoices, receipts, pharmacy 
 
 1. `createClaim` calls `requireViewer` to require an authenticated, active profile.
 2. The action checks the number of files, package size, reported MIME type, file size, and binary file signature.
-4. A reference is generated in the form `CLM-YYYY-XXXXXXXX` using the year and a random UUID fragment.
+4. PostgreSQL generates a reference in the form `CLM-YYYYMMDD-NNNNNN`, using the Mauritius submission date and an atomic sequence (for example, `CLM-20260911-000042`). Existing claim references remain unchanged.
 5. A `claims` record is created with status `PROCESSING`.
 6. For a client, `client_id` is set to that client's profile ID.
 7. Each object is stored under a generated path:

@@ -77,13 +77,13 @@ export async function createClaim(_state: ClaimFormState, formData: FormData): P
   if (isDemoMode) redirect("/claims?created=1");
 
   const supabase = await createClient();
-  const reference = `CLM-${new Date().getUTCFullYear()}-${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
   const { data: claim, error: claimError } = await supabase.from("claims").insert({
-    reference, created_by: viewer.id, patient_name: "",
+    created_by: viewer.id, patient_name: "",
     provider_name: "", status: "PROCESSING",
     client_id: viewer.role === "client" ? viewer.id : null,
-  }).select("id").single();
+  }).select("id,reference").single();
   if (claimError || !claim) return { error: "Could not create the claim. Please try again." };
+  const reference = claim.reference as string;
 
   const uploadedPaths: string[] = [];
   try {
