@@ -2,6 +2,20 @@
 
 ClaimLens AI is an AI-assisted health-insurance claims platform and dissertation research prototype. It combines a secure, role-based claims workflow with a reproducible document-extraction research pipeline.
 
+## 2026 Flutter mobile migration
+
+The dissertation frontend now includes a Flutter mobile application at `mobile/claimlens_mobile`. The existing Next.js application remains at `apps/web` as the working web prototype and has not been deleted. The mobile runtime is:
+
+```text
+Flutter mobile app
+        -> FastAPI REST/JSON and multipart API
+        -> server-side OpenCV + Tesseract/PyMuPDF/DOCX extraction
+        -> Regex/rule-based field extraction
+        -> existing Supabase Auth, PostgreSQL, RLS, Storage, and RPC functions
+```
+
+The repository did not previously contain SQLAlchemy models, Alembic migrations, FastAPI claim/auth routes, PaddleOCR, or a spaCy pipeline. The authoritative schema is the existing Supabase migration set. The FastAPI foundation has therefore been expanded as the smallest compatible mobile gateway, without creating a conflicting second database layer. See [Flutter migration architecture](docs/mobile-architecture.md) and the [mobile setup guide](mobile/claimlens_mobile/README.md).
+
 The central idea is not simply to run OCR. ClaimLens is designed around the complete accountable workflow:
 
 ```text
@@ -43,6 +57,7 @@ ClaimLens has two connected but separately evaluated parts.
 
 | Area | Current state | What it does |
 |---|---|---|
+| Flutter mobile application | Implemented; native runners require Flutter SDK generation | Secure login, role-aware dashboard, multi-document camera/gallery/file upload, OCR progress, editable predictions and confidence, package confirmation, history, details, profile, and logout |
 | Next.js web application | Implemented and deployed | Signup, login, password recovery, dashboards, claim submission, private uploads, queues, assignment, verification, supervisor decisions, settlement tracking, audit, analytics, and user administration |
 | Supabase Auth | Implemented and live | Password authentication, email confirmation flow, secure sessions, account status, and automatic client profiles |
 | Role-based access control | Implemented and live | Client, Claims Officer, Supervisor, and Administrator permissions enforced in UI, Server Actions, database functions, and Row Level Security |
@@ -50,7 +65,7 @@ ClaimLens has two connected but separately evaluated parts.
 | Supabase Storage | Implemented and live | Private PDF/JPEG/PNG/DOCX storage with short-lived signed document URLs |
 | Pipeline A research baseline | Implemented locally | PyMuPDF text extraction, regular expressions, deterministic normalisation, and field-by-field evaluation |
 | Synthetic golden dataset | Pilot implemented | One synthetic claim form, invoice, receipt, ground-truth JSON, hashes, and evidence bounding boxes |
-| FastAPI service | Foundation only in the committed release | Root and health endpoints; it is not yet used by the deployed Next.js application |
+| FastAPI service | Mobile gateway implemented | Supabase authentication, role-scoped claim APIs, private multipart upload, Python OCR/rules processing, dashboard/history/details, and transactional confirmation |
 | Live document worker | Implemented and deployed | Vercel Workflow processes every claim document, uses embedded PDF/DOCX text or bundled local OCR for scans and photos, applies deterministic rules, saves evidence-linked fields, and advances claims to review |
 | Pipeline B | Research design frozen; implementation pending | Quality assessment, adaptive preprocessing, layout-aware OCR, hybrid NLP, validation, and evidence localisation |
 | Pipeline C / document VLM | Optional future experiment | Selective fallback for difficult or low-confidence documents |
@@ -126,12 +141,14 @@ flowchart LR
     VAL --> DB
 ```
 
-The processing release uses Vercel Workflow for durable orchestration inside the Next.js deployment. Each submission creates a job, starts retryable processing steps, reads the private documents through a server-only Supabase client, persists extracted fields, and records lifecycle events. The FastAPI service remains a foundation for the later Python OCR/NLP research pipeline.
+The web processing release uses Vercel Workflow for durable orchestration inside the Next.js deployment. The Flutter client uses the FastAPI gateway, which performs the Python document pipeline and writes to the same protected Supabase records. The two frontends share data but keep their processing entry points explicit.
 
 ## 5. Technology choices
 
 | Layer | Technology | Reason for selection |
 |---|---|---|
+| Mobile framework | Flutter / Dart | One mobile codebase, camera/file integration, null safety, and Android-first delivery with an iOS path |
+| Mobile API | FastAPI | Central authentication, multipart upload, OCR orchestration, typed OpenAPI contract, and safe server-only credentials |
 | Web framework | Next.js 16, React 19, TypeScript | Server rendering, Server Actions, route protection, type safety, and straightforward Vercel deployment |
 | Validation | Zod | Validates untrusted form data before database operations |
 | Authentication | Supabase Auth | Managed password accounts, sessions, confirmation emails, and server-side user administration |
@@ -147,8 +164,9 @@ The processing release uses Vercel Workflow for durable orchestration inside the
 | Baseline extraction | Python regular expressions and rules | Transparent, reproducible, and easy to compare against the proposed hybrid pipeline |
 | Annotation validation | JSON Schema | Machine-checkable ground-truth structure and repeatable dataset validation |
 | Planned OCR | PaddleOCR | OCR and layout-processing research path for scanned/degraded documents |
-| Planned image processing | OpenCV | Quality assessment and controlled preprocessing |
-| Planned NLP | spaCy plus deterministic rules | Contextual extraction where rules alone are insufficient |
+| Mobile OCR | PyMuPDF, OpenCV, Tesseract, python-docx | Embedded text, scanned PDF/image preprocessing and OCR, plus Word document extraction |
+| Mobile field extraction | Python regular expressions and rules | Transparent port of the existing web rules with per-document confidence and evidence |
+| Planned NLP extension | spaCy plus deterministic rules | Future contextual extraction where experiments show that rules alone are insufficient |
 
 ## 6. User roles and permissions
 
@@ -536,7 +554,7 @@ ClaimLens AI/
 │       │   └── supabase/            # Browser, server, admin, and proxy clients
 │       └── proxy.ts                 # Next.js 16 request proxy entry point
 ├── services/
-│   └── api/                         # FastAPI foundation for future orchestration
+│   └── api/                         # FastAPI mobile gateway and Python OCR/extraction
 ├── supabase/
 │   └── migrations/                  # PostgreSQL schema, RLS, and RPC history
 ├── datasets/
@@ -557,6 +575,12 @@ ClaimLens AI/
 
 | File | What to explain in the viva |
 |---|---|
+| `mobile/claimlens_mobile/lib/services/api_client.dart` | Central Dio configuration, secure token injection, refresh, and API error handling |
+| `mobile/claimlens_mobile/lib/screens/new_claim_screen.dart` | Multi-document camera, gallery, PDF, DOCX, and image acquisition |
+| `mobile/claimlens_mobile/lib/screens/extracted_info_screen.dart` | Human-in-the-loop corrections, confidence, duplicates, and payable-document selection |
+| `services/api/app/routers/claims.py` | Role-scoped REST API, upload validation/compensation, processing, and confirmation entry points |
+| `services/api/app/processing.py` | Server-side document reading, OpenCV/Tesseract processing, persistence, and audit lifecycle |
+| `services/api/app/extraction.py` | Transparent document classification, amount/currency ranking, and field rules |
 | `apps/web/lib/supabase/proxy.ts` | Session refresh and public/protected route decision |
 | `apps/web/lib/auth.ts` | Active profile lookup and server-side role guards |
 | `apps/web/app/signup/actions.ts` | Secure public signup without a client-controlled role |
@@ -834,12 +858,16 @@ datasets/results/pilot-pipeline-a/
 └── report.md
 ```
 
-## 27. FastAPI foundation
+## 27. FastAPI mobile gateway
 
-The committed API currently exposes:
+The mobile gateway exposes the two service endpoints below and the complete authenticated API described afterward:
 
 - `GET /` — service name, version, and running status;
 - `GET /api/v1/health` — health response.
+
+It also provides Supabase login/refresh/logout, the active profile, a live role-scoped dashboard, claim search/history/details, multi-document upload, Python OCR/extraction, and transactional claim confirmation. The exact routes are listed in [the mobile architecture guide](docs/mobile-architecture.md).
+
+Copy `services/api/.env.example` to `services/api/.env`, then provide `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and the server-only `SUPABASE_SECRET_KEY`. Install the Tesseract executable and set `TESSERACT_CMD` only when it is not already on `PATH`. Never place the secret key in Flutter.
 
 To run it after installing its requirements:
 
@@ -859,7 +887,22 @@ Set-Location services\api
 
 Open <http://127.0.0.1:8000/docs> for FastAPI's generated OpenAPI interface.
 
-This service is not currently called by the production web app. Supabase migrations remain the authoritative application database schema. Vercel Workflow runs production extraction; FastAPI remains a tested foundation for the later PaddleOCR/OpenCV/Python research pipeline and must not introduce a second, conflicting database schema.
+The web prototype continues using its Vercel Workflow. The Flutter application uses FastAPI. Both share the same authoritative Supabase users, PostgreSQL schema, RLS policies, private storage, and transactional RPC functions.
+
+### Run the Flutter client
+
+After installing Flutter:
+
+```powershell
+Set-Location mobile\claimlens_mobile
+flutter create --platforms=android,ios --org ai.claimlens .
+flutter pub get
+flutter analyze
+flutter test
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api/v1
+```
+
+These commands generate the native runners, install packages, verify the Dart project, run tests, and launch it against FastAPI from an Android emulator. See the [mobile README](mobile/claimlens_mobile/README.md) for a physical device and production HTTPS URL.
 
 ## 28. Production deployment
 
@@ -928,7 +971,7 @@ Still required before the final dissertation release:
 
 Be direct about these in the viva:
 
-1. The live web application does not yet invoke the FastAPI service; baseline processing is implemented in Vercel Workflow.
+1. The live web application still uses Vercel Workflow, while the new Flutter client uses FastAPI; production deployment of the mobile API is a separate step.
 2. Bundled local OCR avoids provider billing but is less accurate on handwriting; difficult results require manual review. Optional Gemini OCR depends on provider availability and quota.
 3. The rich review workspace now shows live extracted values, but coordinate-level page highlighting remains part of the next evidence release.
 4. The deterministic baseline itself reads embedded PDF/DOCX text; scanned-image transcription is a separate model-assisted fallback before the same rules run.
@@ -1008,7 +1051,7 @@ Next.js supports Server Components for protected reads, Server Actions for mutat
 
 ### Why is FastAPI present if Next.js uses Supabase directly?
 
-Development is staged. Vercel Workflow now orchestrates the lightweight production baseline close to the Next.js application. FastAPI remains because the planned PaddleOCR, OpenCV, and NLP research pipeline is Python-based and heavier than the baseline serverless path.
+Development is staged. Vercel Workflow orchestrates the deployed web baseline. FastAPI now serves the Flutter client and runs PyMuPDF/DOCX extraction, OpenCV preprocessing, Tesseract OCR, and transparent Python rules. PaddleOCR and spaCy remain optional experimental extensions rather than claimed current features.
 
 ### How is RBAC enforced?
 
@@ -1097,7 +1140,7 @@ The recommended order is:
 1. configure production SMTP and CAPTCHA for public registration;
 2. apply and verify the processing migration in the production Supabase project;
 3. deploy the workflow-enabled Next.js build and run an end-to-end production claim;
-4. finalise the FastAPI OCR/NLP API contract;
+4. deploy the implemented FastAPI mobile gateway behind HTTPS and run device integration tests;
 5. implement document classification and quality assessment;
 6. implement scanned-document OCR with coordinate provenance;
 7. freeze and benchmark Pipeline A on a larger dataset;

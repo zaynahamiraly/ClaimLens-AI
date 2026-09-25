@@ -1,0 +1,28 @@
+name: claimlens_mobile
+description: ClaimLens AI mobile client for claim submission and review.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  dio: ^5.7.0
+  file_picker: ^8.1.4
+  flutter_secure_storage: ^9.2.2
+  http_parser: ^4.1.2
+  image_picker: ^1.1.2
+  intl: ^0.20.2
+  provider: ^6.1.2
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

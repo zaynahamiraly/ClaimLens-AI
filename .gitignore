@@ -43,4 +43,5 @@ uploads/
 storage/
 .vercel
 .env*
+!**/.env.example
 **/supabase/.temp/
