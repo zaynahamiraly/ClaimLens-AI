@@ -15,7 +15,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => context.read<ClaimsProvider>().loadDashboard());
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => context.read<ClaimsProvider>().loadDashboard());
   }
 
   @override
@@ -24,39 +25,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final user = context.watch<AuthProvider>().user!;
     final dashboard = data.dashboard;
     return Scaffold(
-      appBar: AppBar(title: const Text('Overview'), actions: [IconButton(onPressed: data.busy ? null : data.loadDashboard, icon: const Icon(Icons.refresh))]),
+      appBar: AppBar(title: const Text('Overview'), actions: [
+        IconButton(
+            onPressed: data.busy ? null : data.loadDashboard,
+            icon: const Icon(Icons.refresh))
+      ]),
       body: RefreshIndicator(
         onRefresh: data.loadDashboard,
-        child: ListView(padding: const EdgeInsets.all(16), children: [
-          Text('Hello, ${user.displayName}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(user.isClient ? 'Track your submissions and complete any required action.' : 'Your role-based operational view.', style: Theme.of(context).textTheme.bodyMedium),
-          const SizedBox(height: 20),
-          if (data.error != null) _ErrorCard(message: data.error!, retry: data.loadDashboard),
-          if (data.dashboard == null && data.busy) const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
-          if (dashboard != null) ...[
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.6,
-              children: [
-                _Metric(label: 'All claims', value: dashboard.total, icon: Icons.folder_copy_outlined),
-                _Metric(label: 'Processing', value: dashboard.processing, icon: Icons.sync),
-                _Metric(label: 'Needs review', value: dashboard.reviewRequired, icon: Icons.fact_check_outlined),
-                _Metric(label: 'Verified', value: dashboard.verified, icon: Icons.verified_outlined),
-                _Metric(label: 'Failed', value: dashboard.failed, icon: Icons.error_outline),
+        child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            children: [
+              Text('Hello, ${user.displayName}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(
+                  user.isClient
+                      ? 'Track your submissions and complete any required action.'
+                      : 'Your role-based operational view.',
+                  style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 20),
+              if (data.error != null)
+                _ErrorCard(message: data.error!, retry: data.loadDashboard),
+              if (data.dashboard == null && data.busy)
+                const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator())),
+              if (dashboard != null) ...[
+                LayoutBuilder(builder: (context, constraints) {
+                  final columns = constraints.maxWidth < 300 ||
+                          MediaQuery.textScalerOf(context).scale(16) > 24
+                      ? 1
+                      : 2;
+                  final cardWidth =
+                      (constraints.maxWidth - (columns - 1) * 12) / columns;
+                  return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        _Metric(
+                            label: 'All claims',
+                            value: dashboard.total,
+                            icon: Icons.folder_copy_outlined),
+                        _Metric(
+                            label: 'Processing',
+                            value: dashboard.processing,
+                            icon: Icons.sync),
+                        _Metric(
+                            label: 'Needs review',
+                            value: dashboard.reviewRequired,
+                            icon: Icons.fact_check_outlined),
+                        _Metric(
+                            label: 'Verified',
+                            value: dashboard.verified,
+                            icon: Icons.verified_outlined),
+                        _Metric(
+                            label: 'Failed',
+                            value: dashboard.failed,
+                            icon: Icons.error_outline),
+                      ]
+                          .map((metric) =>
+                              SizedBox(width: cardWidth, child: metric))
+                          .toList());
+                }),
+                const SizedBox(height: 24),
+                Text('Recent claims',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
+                if (dashboard.recent.isEmpty)
+                  const Card(
+                      child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Text(
+                              'No claims yet. Use New claim to upload your first documents.'))),
+                ...dashboard.recent.map((claim) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: ClaimCard(claim: claim))),
               ],
-            ),
-            const SizedBox(height: 24),
-            Text('Recent claims', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 12),
-            if (dashboard.recent.isEmpty) const Card(child: Padding(padding: EdgeInsets.all(24), child: Text('No claims yet. Use New claim to upload your first documents.'))),
-            ...dashboard.recent.map((claim) => Padding(padding: const EdgeInsets.only(bottom: 12), child: ClaimCard(claim: claim))),
-          ],
-        ]),
+            ]),
       ),
     );
   }
@@ -68,7 +120,22 @@ class _Metric extends StatelessWidget {
   final int value;
   final IconData icon;
   @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Icon(icon, color: Theme.of(context).colorScheme.primary), const Spacer(), Text('$value', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)), Text(label)])));
+  Widget build(BuildContext context) => Card(
+      child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(height: 12),
+                Text('$value',
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+                Text(label)
+              ])));
 }
 
 class _ErrorCard extends StatelessWidget {
@@ -76,5 +143,12 @@ class _ErrorCard extends StatelessWidget {
   final String message;
   final VoidCallback retry;
   @override
-  Widget build(BuildContext context) => Card(color: Theme.of(context).colorScheme.errorContainer, child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [Expanded(child: Text(message)), TextButton(onPressed: retry, child: const Text('Retry'))])));
+  Widget build(BuildContext context) => Card(
+      color: Theme.of(context).colorScheme.errorContainer,
+      child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Expanded(child: Text(message)),
+            TextButton(onPressed: retry, child: const Text('Retry'))
+          ])));
 }

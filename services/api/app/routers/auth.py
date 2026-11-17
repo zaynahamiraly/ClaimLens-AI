@@ -62,3 +62,41 @@ async def logout(
     gateway = SupabaseGateway(request)
     await gateway.request_json("POST", "/auth/v1/logout", token=user.token, expected={204})
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Registration is always a client account; roles are assigned by the database.
+from ..schemas import EmailRequest, SignupRequest, ResetPasswordRequest
+
+
+@router.post("/signup")
+async def signup(payload: SignupRequest, request: Request) -> dict[str, str]:
+    gateway = SupabaseGateway(request)
+    data = await gateway.request_json("POST", "/auth/v1/signup", json={
+        "email": payload.email.strip().lower(),
+        "password": payload.password,
+        "data": {"display_name": payload.display_name.strip()},
+    })
+    # Do not expose duplicate-account detection or automatically persist a session.
+    if data.get("access_token"):
+        message = "Your account is ready. Return to Sign in."
+    else:
+        message = "Check your email for a confirmation link, then return here to sign in. If you already have an account, use Sign in or Forgot password."
+    return {"message": message}
+
+
+@router.post("/forgot-password")
+async def forgot_password(payload: EmailRequest, request: Request) -> dict[str, str]:
+    gateway = SupabaseGateway(request)
+    await gateway.request_json("POST", "/auth/v1/recover", json={"email": payload.email.strip().lower()})
+    return {"message": "If an account exists for this email, a recovery email will arrive shortly. Enter its code below. Check your spam folder too."}
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordRequest, request: Request) -> dict[str, str]:
+    gateway = SupabaseGateway(request)
+    verified = await gateway.request_json("POST", "/auth/v1/verify", json={
+        "email": payload.email.strip().lower(), "token": payload.code, "type": "recovery",
+    })
+    # Only a session issued by recovery verification can authorize this update.
+    await gateway.request_json("PUT", "/auth/v1/user", token=verified["access_token"], json={"password": payload.password})
+    return {"message": "Password updated. Return to Sign in with your new password."}

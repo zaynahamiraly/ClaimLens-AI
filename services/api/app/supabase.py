@@ -29,9 +29,12 @@ class SupabaseGateway:
         if service and not key:
             raise HTTPException(
                 status_code=503,
-                detail="SUPABASE_SECRET_KEY is required for document processing.",
+                detail="Document processing is temporarily unavailable. Please contact support.",
             )
-        headers = {"apikey": key, "Authorization": f"Bearer {token or key}"}
+        headers = {"apikey": key}
+        # Publishable/secret keys are API keys, not JWT access tokens.
+        if token or key.startswith("eyJ"):
+            headers["Authorization"] = f"Bearer {token or key}"
         if prefer:
             headers["Prefer"] = prefer
         return headers
